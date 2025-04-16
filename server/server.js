@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const cookieParser = require('cookie-parser');
 const socketHandlers = require('./socket');
 const authRoutes = require('./routes/auth');
 const gameRoutes = require('./routes/game');
@@ -32,6 +33,7 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cookieParser());
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/sketch-game')
