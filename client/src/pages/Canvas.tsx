@@ -1,15 +1,16 @@
 import { useRef, useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { 
   FaPaintBrush, FaEraser, FaUndo, FaRedo, 
-  FaTrash, FaSave, FaPalette
+  FaTrash, FaSave, FaPalette, FaUsers, FaSignOutAlt, 
+  FaShareAlt, FaCopy  // Add these icons
 } from "react-icons/fa";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -19,7 +20,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card } from "@/components/ui/card";
+import { useSocket } from "@/contexts/SocketContext";
+import { useRooms } from "@/hooks/useRooms";
+import { RoomSelector } from "@/components/RoomSelector/RoomSelector";
+import { UsersList } from "@/components/UsersList/UsersList";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 interface Point {
   x: number;
@@ -40,6 +55,7 @@ interface CanvasState {
 
 const Canvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<'brush' | 'eraser'>('brush');
   const [color, setColor] = useState('#000000');
@@ -50,12 +66,127 @@ const Canvas = () => {
   });
   const [undoStack, setUndoStack] = useState<Line[]>([]);
   const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
+  const { leaveRoom } = useRooms();
+  const { toast } = useToast();
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const shareInputRef = useRef<HTMLInputElement>(null);
   
   // Colors array for the color picker
   const colors = [
     '#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', 
     '#ffff00', '#ff00ff', '#00ffff', '#ffa500', '#800080'
   ];
+
+  // Get the room id from URL params or state
+  const [roomId, setRoomId] = useState<string | null>(
+    searchParams.get('roomId')
+  );
+  
+  // Update URL when room changes
+  useEffect(() => {
+    if (roomId) {
+      setSearchParams({ roomId });
+    } else {
+      setSearchParams({});
+    }
+  }, [roomId, setSearchParams]);
+  
+  // Join the room when roomId is available
+  useEffect(() => {
+    if (roomId && socket && isConnected) {
+      socket.emit('join_room', { roomId }, (response: any) => {
+        if (response.success) {
+          toast({
+            title: 'Room Joined',
+            description: `You've joined ${response.roomName}`,
+            duration: 3000
+          });
+          
+          // Load the canvas state from server
+          if (response.canvasState && response.canvasState.lines) {
+            setCanvasState(prev => ({
+              ...prev,
+              lines: response.canvasState.lines
+            }));
+          }
+        } else {
+          toast({
+            title: 'Error',
+            description: response.error || 'Failed to join room',
+            variant: 'destructive',
+            duration: 5000
+          });
+          setRoomId(null);
+        }
+      });
+    }
+    
+    return () => {
+      if (roomId && socket && isConnected) {
+        socket.emit('leave_room', { roomId });
+      }
+    };
+  }, [roomId, socket, isConnected, toast]);
+  
+  // Listen for drawing events from other users
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleDrawLine = ({ userId, line }: { userId: string, line: Line }) => {
+      if (userId !== user?.id) {
+        setCanvasState(prev => ({
+          ...prev,
+          lines: [...prev.lines, line]
+        }));
+      }
+    };
+    
+    const handleCanvasCleared = () => {
+      setCanvasState({ lines: [], currentLine: null });
+      setUndoStack([]);
+      toast({
+        title: 'Canvas Cleared',
+        description: 'The canvas has been cleared',
+        duration: 3000
+      });
+    };
+    
+    const handleUndo = ({ userId, lineIndex }: { userId: string, lineIndex: number }) => {
+      if (userId !== user?.id) {
+        setCanvasState(prev => {
+          const newLines = [...prev.lines];
+          newLines.splice(lineIndex, 1);
+          return {
+            ...prev,
+            lines: newLines
+          };
+        });
+      }
+    };
+    
+    const handleRedo = ({ userId, line }: { userId: string, line: Line }) => {
+      if (userId !== user?.id) {
+        setCanvasState(prev => ({
+          ...prev,
+          lines: [...prev.lines, line]
+        }));
+      }
+    };
+    
+    // Register socket event listeners
+    socket.on('draw_end', handleDrawLine);
+    socket.on('canvas_cleared', handleCanvasCleared);
+    socket.on('undo', handleUndo);
+    socket.on('redo', handleRedo);
+    
+    return () => {
+      socket.off('draw_end', handleDrawLine);
+      socket.off('canvas_cleared', handleCanvasCleared);
+      socket.off('undo', handleUndo);
+      socket.off('redo', handleRedo);
+    };
+  }, [socket, isConnected, user, toast]);
 
   // Handle drawing actions
   useEffect(() => {
@@ -132,8 +263,10 @@ const Canvas = () => {
     };
   }, [canvasState]);
 
-  // Handle mouse/touch events
+  // Handle mouse/touch events with socket integration
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!roomId || !socket) return;
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
     
@@ -164,10 +297,18 @@ const Canvas = () => {
       ...prev,
       currentLine: newLine,
     }));
+    
+    // Emit draw_start event
+    socket.emit('draw_start', {
+      roomId,
+      point: { x, y },
+      color,
+      width: brushWidth
+    });
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
+    if (!isDrawing || !roomId || !socket) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -214,6 +355,12 @@ const Canvas = () => {
         ctx.stroke();
       }
       
+      // Emit draw_move event
+      socket.emit('draw_move', {
+        roomId,
+        point: { x, y }
+      });
+      
       return {
         ...prev,
         currentLine: updatedLine,
@@ -222,25 +369,34 @@ const Canvas = () => {
   };
 
   const endDrawing = () => {
-    if (!isDrawing) return;
+    if (!isDrawing || !roomId || !socket) return;
     setIsDrawing(false);
     
     setCanvasState(prev => {
       if (!prev.currentLine) return prev;
       
-      // Add the current line to the lines array
+      const finishedLine = prev.currentLine;
+      
+      // Emit draw_end event
+      socket.emit('draw_end', {
+        roomId,
+        line: finishedLine
+      });
+      
       return {
-        lines: [...prev.lines, prev.currentLine],
+        lines: [...prev.lines, finishedLine],
         currentLine: null,
       };
     });
     
-    // Clear the redo stack when a new line is drawn
     setUndoStack([]);
   };
 
-  // Handle undo/redo/clear
+  // Handle undo/redo/clear with socket integration
   const handleUndo = () => {
+    if (!roomId || !socket) return;
+    socket.emit('undo', { roomId });
+    
     setCanvasState(prev => {
       if (prev.lines.length === 0) return prev;
       
@@ -257,13 +413,14 @@ const Canvas = () => {
   };
 
   const handleRedo = () => {
-    if (undoStack.length === 0) return;
+    if (!roomId || !socket || undoStack.length === 0) return;
     
     const lineToRedo = undoStack[undoStack.length - 1];
     const newUndoStack = undoStack.slice(0, -1);
     
-    setUndoStack(newUndoStack);
+    socket.emit('redo', { roomId, line: lineToRedo });
     
+    setUndoStack(newUndoStack);
     setCanvasState(prev => ({
       ...prev,
       lines: [...prev.lines, lineToRedo],
@@ -271,10 +428,13 @@ const Canvas = () => {
   };
 
   const handleClear = () => {
+    if (!roomId || !socket) return;
+    
+    socket.emit('clear_canvas', { roomId });
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
   };
-
+  
   const handleSave = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -317,6 +477,60 @@ const Canvas = () => {
     link.href = dataUrl;
     link.click();
   };
+  
+  const handleLeaveRoom = () => {
+    leaveRoom();
+    setRoomId(null);
+    setCanvasState({ lines: [], currentLine: null });
+    setUndoStack([]);
+    
+    toast({
+      title: 'Room Left',
+      description: 'You have left the drawing room',
+      duration: 3000
+    });
+  };
+
+  // Generate shareable URL for the current room
+  const getRoomShareUrl = () => {
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/game?roomId=${roomId}`;
+  };
+
+  // Copy the room URL to clipboard
+  const copyRoomUrl = () => {
+    const url = getRoomShareUrl();
+    navigator.clipboard.writeText(url).then(() => {
+      toast({
+        title: "Link copied!",
+        description: "Share this link with others to join your room",
+        duration: 2000
+      });
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+      toast({
+        title: "Copy failed",
+        description: "Please try again or copy the link manually",
+        variant: "destructive",
+        duration: 3000
+      });
+    });
+    setShareDialogOpen(false);
+  };
+
+  // If we don't have a roomId, show room selector
+  if (!roomId) {
+    return (
+      <motion.div 
+        className="container max-w-6xl mx-auto py-8"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        <RoomSelector onRoomSelected={setRoomId} />
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div 
@@ -332,11 +546,86 @@ const Canvas = () => {
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
         >
-          <h1 className="text-2xl font-bold">
-            <span className="text-primary">Quick</span>Doodle Canvas
-          </h1>
-          <div className="text-sm text-muted-foreground">
-            {user && <span>Drawing as: {user.username}</span>}
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">
+              <span className="text-primary">Quick</span>Doodle Canvas
+            </h1>
+            {user && (
+              <div className="text-sm text-muted-foreground hidden md:block">
+                Drawing as: {user.username}
+              </div>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {/* Share Room Button */}
+            <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+              <DialogTrigger asChild>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <FaShareAlt />
+                        Share
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Share Room</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Share this room</DialogTitle>
+                  <DialogDescription>
+                    Anyone with this link can join your drawing room
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex items-center space-x-2 mt-2">
+                  <Input
+                    ref={shareInputRef}
+                    readOnly
+                    value={getRoomShareUrl()}
+                    onClick={(e) => e.currentTarget.select()}
+                    className="flex-1"
+                  />
+                  <Button onClick={copyRoomUrl} className="gap-2">
+                    <FaCopy /> Copy
+                  </Button>
+                </div>
+                <DialogFooter className="mt-4">
+                  <Button variant="secondary" onClick={() => setShareDialogOpen(false)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            
+            <UsersList />
+            
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleLeaveRoom}
+                    className="gap-2"
+                  >
+                    <FaSignOutAlt />
+                    Leave
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Leave Room</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </motion.div>
 
@@ -531,6 +820,7 @@ const Canvas = () => {
       </div>
     </motion.div>
   );
+
 };
 
 export default Canvas;

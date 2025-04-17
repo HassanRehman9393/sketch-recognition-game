@@ -5,6 +5,9 @@ const http = require('http');
 const socketIo = require('socket.io');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
+const roomRoutes = require('./routes/roomRoutes');
+const { initializeSocket } = require('./socket/socketHandler');
+const socketAuthMiddleware = require('./middleware/socketAuth');
 
 // Load environment variables
 dotenv.config();
@@ -13,17 +16,16 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// CORS configuration - Updated to allow requests from Vite's default port
+// Middleware
+app.use(express.json());
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Allow Vite's default port
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
 }));
 
-// Middleware
-app.use(express.json());
-
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/rooms', roomRoutes);
 
 // Default route
 app.get('/', (req, res) => {
@@ -33,20 +35,18 @@ app.get('/', (req, res) => {
 // Initialize Socket.io
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173', // Also update Socket.io CORS
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
-// Socket.io connections
-io.on('connection', (socket) => {
-  console.log('New client connected');
-  
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
+// Auth middleware for Socket.io
+// Uncomment when ready to enforce authentication
+// io.use(socketAuthMiddleware);
+
+// Initialize socket handlers
+initializeSocket(io);
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
@@ -57,8 +57,14 @@ mongoose.connect(process.env.MONGODB_URI)
     const PORT = process.env.PORT || 5001;
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      console.log(`Socket.io server configured and ready`);
     });
   })
   .catch(err => {
     console.error('MongoDB connection error:', err.message);
   });
+
+// Handle unexpected errors
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+});

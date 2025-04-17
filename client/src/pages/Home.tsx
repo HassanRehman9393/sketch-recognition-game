@@ -168,10 +168,6 @@ const Home = () => {
                 src="/drawing-illustration.svg" 
                 alt="QuickDoodle Game Interface" 
                 className="w-full rounded-xl"
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = "https://placehold.co/1200x600/9333ea/ffffff?text=QuickDoodle+Game";
-                }}
               />
               
               {/* Floating recognition panel - simulates game UI */}
