@@ -6,6 +6,7 @@ export interface Room {
   id: string;
   name: string;
   userCount: number;
+  isPrivate?: boolean;
 }
 
 export interface User {
@@ -15,15 +16,18 @@ export interface User {
 
 interface CreateRoomOptions {
   roomName: string;
+  isPrivate?: boolean;
 }
 
 interface JoinRoomOptions {
-  roomId: string;
+  roomId?: string;
+  roomCode?: string;
 }
 
 interface RoomResponse {
   success: boolean;
   roomId?: string;
+  accessCode?: string;
   error?: string;
   roomName?: string;
   users?: User[];
@@ -38,23 +42,34 @@ export function useRooms() {
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // Fetch available rooms
+  const fetchRooms = useCallback(() => {
+    if (!socket || !isConnected) return;
+
+    socket.emit('get_rooms', (publicRooms: Room[]) => {
+      console.log('Received rooms:', publicRooms);
+      setRooms(publicRooms);
+    });
+  }, [socket, isConnected]);
+
   // Listen for room list updates
   useEffect(() => {
     if (!socket || !isConnected) return;
 
     const handleRoomsList = (updatedRooms: Room[]) => {
+      console.log('Rooms list updated:', updatedRooms);
       setRooms(updatedRooms);
     };
 
     socket.on('rooms_list', handleRoomsList);
     
-    // Request initial rooms list
-    socket.emit('get_rooms');
+    // Initial fetch
+    fetchRooms();
 
     return () => {
       socket.off('rooms_list', handleRoomsList);
     };
-  }, [socket, isConnected]);
+  }, [socket, isConnected, fetchRooms]);
 
   // Listen for room users updates
   useEffect(() => {
@@ -63,14 +78,13 @@ export function useRooms() {
     const handleRoomUsers = (users: User[]) => {
       setRoomUsers(users);
     };
-
-    socket.on('room_users', handleRoomUsers);
     
     const handleUserJoined = (user: User) => {
       setRoomUsers(prev => [...prev, user]);
       toast({
         title: 'User Joined',
-        description: `${user.username} has joined the room`
+        description: `${user.username} has joined the room`,
+        duration: 3000
       });
     };
     
@@ -78,10 +92,12 @@ export function useRooms() {
       setRoomUsers(prev => prev.filter(u => u.userId !== user.userId));
       toast({
         title: 'User Left',
-        description: `${user.username} has left the room`
+        description: `${user.username} has left the room`,
+        duration: 3000
       });
     };
 
+    socket.on('room_users', handleRoomUsers);
     socket.on('user_joined', handleUserJoined);
     socket.on('user_left', handleUserLeft);
 
@@ -93,7 +109,7 @@ export function useRooms() {
   }, [socket, isConnected, currentRoomId, toast]);
 
   // Create a new room
-  const createRoom = useCallback(async ({ roomName }: CreateRoomOptions): Promise<RoomResponse> => {
+  const createRoom = useCallback(async ({ roomName, isPrivate = false }: CreateRoomOptions): Promise<RoomResponse> => {
     setLoading(true);
     
     try {
@@ -106,21 +122,24 @@ export function useRooms() {
       }
 
       return new Promise((resolve, reject) => {
-        socket.emit('create_room', { roomName: roomName.trim() }, (response: RoomResponse) => {
+        socket.emit('create_room', { 
+          roomName: roomName.trim(),
+          isPrivate
+        }, (response: RoomResponse) => {
+          setLoading(false);
           if (response.success) {
-            setCurrentRoomId(response.roomId!);
+            console.log('Room created successfully:', response);
             resolve(response);
           } else {
             reject(new Error(response.error || 'Failed to create room'));
           }
-          setLoading(false);
         });
         
         // Handle timeout if server doesn't respond
         setTimeout(() => {
           if (loading) {
-            reject(new Error('Server response timeout'));
             setLoading(false);
+            reject(new Error('Server response timeout'));
           }
         }, 5000);
       });
@@ -131,18 +150,33 @@ export function useRooms() {
   }, [socket, isConnected, loading]);
 
   // Join an existing room
-  const joinRoom = useCallback(async ({ roomId }: JoinRoomOptions): Promise<RoomResponse> => {
+  const joinRoom = useCallback(async ({ roomId, roomCode }: JoinRoomOptions): Promise<RoomResponse> => {
     setLoading(true);
     
     try {
       if (!socket || !isConnected) {
         throw new Error('Socket not connected');
       }
+      
+      if (!roomId && !roomCode) {
+        throw new Error('Room ID or room code is required');
+      }
 
+      // Normalize room code if provided
+      const normalizedRoomCode = roomCode ? roomCode.trim().toUpperCase() : undefined;
+      
+      console.log('Attempting to join room with:', { roomId, roomCode: normalizedRoomCode });
+      
       return new Promise((resolve, reject) => {
-        socket.emit('join_room', { roomId }, (response: RoomResponse) => {
+        socket.emit('join_room', { 
+          roomId, 
+          roomCode: normalizedRoomCode 
+        }, (response: RoomResponse) => {
+          setLoading(false);
+          console.log('Join room response:', response);
+          
           if (response.success) {
-            setCurrentRoomId(roomId);
+            setCurrentRoomId(response.roomId!);
             if (response.users) {
               setRoomUsers(response.users);
             }
@@ -150,14 +184,13 @@ export function useRooms() {
           } else {
             reject(new Error(response.error || 'Failed to join room'));
           }
-          setLoading(false);
         });
         
         // Handle timeout if server doesn't respond
         setTimeout(() => {
           if (loading) {
-            reject(new Error('Server response timeout'));
             setLoading(false);
+            reject(new Error('Server response timeout'));
           }
         }, 5000);
       });
@@ -183,6 +216,7 @@ export function useRooms() {
     loading,
     createRoom,
     joinRoom,
-    leaveRoom
+    leaveRoom,
+    fetchRooms
   };
 }

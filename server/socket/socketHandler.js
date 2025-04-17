@@ -4,6 +4,20 @@ const { v4: uuidv4 } = require('uuid');
 const rooms = new Map();
 const users = new Map();
 
+// Generate a unique alphanumeric room code
+function generateRoomCode() {
+  // Use only uppercase letters and numbers that are less likely to be confused
+  const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+}
+
+// Map to track room codes to room IDs
+const roomCodes = new Map();
+
 /**
  * Initialize socket.io handlers
  * @param {SocketIO.Server} io Socket.io server instance
@@ -26,21 +40,29 @@ function initializeSocket(io) {
     });
     
     // Room creation
-    socket.on('create_room', ({ roomName }, callback) => {
+    socket.on('create_room', ({ roomName, isPrivate = false }, callback) => {
+      console.log('[CREATE_ROOM] Request:', { roomName, isPrivate });
+      
       const user = users.get(socket.id);
       
       if (!user) {
+        console.log('[CREATE_ROOM] Error: User not registered');
         if (callback) callback({ success: false, error: 'User not registered' });
         return;
       }
       
       const roomId = uuidv4();
       
+      // Always generate an access code, even for public rooms
+      const accessCode = generateRoomCode();
+      
       const room = {
         id: roomId,
         name: roomName,
         host: user.userId,
         users: new Map(),
+        isPrivate: isPrivate,
+        accessCode: accessCode,
         canvasState: {
           lines: [],
           undoStack: []
@@ -48,44 +70,127 @@ function initializeSocket(io) {
       };
       
       rooms.set(roomId, room);
-      console.log(`Room created: ${roomName} (${roomId}) by ${user.username}`);
       
-      // Broadcast updated room list to all users
-      io.emit('rooms_list', Array.from(rooms.values()).map(room => ({
-        id: room.id,
-        name: room.name,
-        userCount: room.users.size
-      })));
+      // Always store code mapping, regardless of privacy setting
+      roomCodes.set(accessCode, roomId);
       
-      if (callback) callback({ success: true, roomId });
+      if (isPrivate) {
+        console.log(`[CREATE_ROOM] Private room created: ${roomName} (${roomId}) by ${user.username} with code ${accessCode}`);
+      } else {
+        console.log(`[CREATE_ROOM] Public room created: ${roomName} (${roomId}) by ${user.username} with code ${accessCode}`);
+      }
+      
+      // Add user to the room immediately
+      socket.join(roomId);
+      room.users.set(user.userId, {
+        userId: user.userId,
+        username: user.username,
+        position: { x: 0, y: 0 }
+      });
+      
+      // Send updated room list to all users (only public rooms)
+      broadcastRoomsList();
+      
+      if (callback) {
+        callback({ 
+          success: true, 
+          roomId, 
+          accessCode: room.accessCode
+        });
+      }
     });
     
-    // Join room
-    socket.on('join_room', ({ roomId }, callback) => {
-      const room = rooms.get(roomId);
+    // Helper function to broadcast room list
+    function broadcastRoomsList() {
+      const publicRooms = Array.from(rooms.values())
+        .filter(r => !r.isPrivate)
+        .map(r => ({
+          id: r.id,
+          name: r.name,
+          userCount: r.users.size,
+          isPrivate: false
+        }));
+        
+      io.emit('rooms_list', publicRooms);
+    }
+    
+    // Add explicit handler for get_rooms
+    socket.on('get_rooms', (callback) => {
+      const publicRooms = Array.from(rooms.values())
+        .filter(r => !r.isPrivate)
+        .map(r => ({
+          id: r.id,
+          name: r.name,
+          userCount: r.users.size,
+          isPrivate: false
+        }));
+      
+      if (callback) {
+        callback(publicRooms);
+      } else {
+        socket.emit('rooms_list', publicRooms);
+      }
+    });
+
+    // Join room handler
+    socket.on('join_room', ({ roomId, roomCode }, callback) => {
+      // Debug the incoming request
+      console.log('[JOIN_ROOM] Request:', { roomId, roomCode });
+      
       const user = users.get(socket.id);
       
-      if (!room) {
-        if (callback) callback({ success: false, error: 'Room not found' });
+      if (!user) {
+        console.log('[JOIN_ROOM] Error: User not registered');
+        if (callback) callback({ success: false, error: 'User not registered' });
         return;
       }
       
-      if (!user) {
-        if (callback) callback({ success: false, error: 'User not registered' });
+      // If roomCode is provided, look up the corresponding roomId
+      if (roomCode && !roomId) {
+        // Normalize the room code (uppercase and trim)
+        const normalizedCode = roomCode.toString().trim().toUpperCase();
+        console.log('[JOIN_ROOM] Looking up room by code:', normalizedCode);
+        console.log('[JOIN_ROOM] Available codes:', Array.from(roomCodes.keys()));
+        
+        // Find the roomId for the given code
+        roomId = roomCodes.get(normalizedCode);
+        
+        if (!roomId) {
+          console.log('[JOIN_ROOM] Error: Invalid room code:', normalizedCode);
+          if (callback) callback({ success: false, error: 'Invalid or expired room code' });
+          return;
+        }
+        
+        console.log('[JOIN_ROOM] Found room ID for code:', roomId);
+      }
+      
+      // Now check if we have a valid roomId to join
+      if (!roomId) {
+        console.log('[JOIN_ROOM] Error: No valid roomId or roomCode provided');
+        if (callback) callback({ success: false, error: 'No valid room ID or code provided' });
+        return;
+      }
+      
+      const room = rooms.get(roomId);
+      
+      if (!room) {
+        console.log('[JOIN_ROOM] Error: Room not found:', roomId);
+        if (callback) callback({ success: false, error: 'Room not found' });
         return;
       }
       
       // Add user to room
       socket.join(roomId);
       room.users.set(user.userId, { 
-        ...user,
+        userId: user.userId,
+        username: user.username,
         position: { x: 0, y: 0 }
       });
       
-      console.log(`User ${user.username} joined room ${room.name}`);
+      console.log(`[JOIN_ROOM] Success: User ${user.username} joined room ${room.name} (${roomId})`);
       
-      // Notify other users in the room
-      socket.to(roomId).emit('user_joined', {
+      // Notify room members about the new user
+      io.to(roomId).emit('user_joined', {
         userId: user.userId,
         username: user.username
       });
@@ -93,22 +198,55 @@ function initializeSocket(io) {
       // Send current canvas state to the new user
       socket.emit('canvas_state', room.canvasState);
       
-      // Send list of users in the room
-      const roomUsers = Array.from(room.users.values()).map(user => ({
-        userId: user.userId,
-        username: user.username
-      }));
+      // Send list of room users to the new user along with host info
+      socket.emit('room_users', 
+        Array.from(room.users.values()).map(user => ({
+          userId: user.userId,
+          username: user.username,
+          position: user.position
+        })), 
+        { hostId: room.host }
+      );
       
-      io.to(roomId).emit('room_users', roomUsers);
-      
-      if (callback) callback({ 
-        success: true, 
-        roomName: room.name,
-        users: roomUsers,
-        canvasState: room.canvasState
-      });
+      if (callback) {
+        callback({ 
+          success: true, 
+          roomId: room.id,
+          roomName: room.name,
+          accessCode: room.accessCode,
+          isPrivate: room.isPrivate,
+          hostId: room.host,
+          users: Array.from(room.users.values()).map(user => ({
+            userId: user.userId,
+            username: user.username
+          })),
+          canvasState: room.canvasState
+        });
+      }
     });
-    
+
+    // Add a handler for getting room info
+    socket.on('get_room_info', ({ roomId }, callback) => {
+      const room = rooms.get(roomId);
+      
+      if (!room) {
+        if (callback) callback({ success: false, error: 'Room not found' });
+        return;
+      }
+      
+      if (callback) {
+        callback({
+          success: true,
+          roomName: room.name,
+          hostId: room.host,
+          users: Array.from(room.users.values()).map(user => ({
+            userId: user.userId,
+            username: user.username
+          }))
+        });
+      }
+    });
+
     // Drawing events
     socket.on('draw_start', ({ roomId, point, color, width }) => {
       const room = rooms.get(roomId);
@@ -279,6 +417,22 @@ function initializeSocket(io) {
         console.log(`Socket disconnected: ${socket.id}`);
       }
     });
+
+    // Add a debug endpoint to check room codes (for development only)
+    socket.on('debug_room_codes', (_, callback) => {
+      if (callback) {
+        callback({
+          roomCodes: Array.from(roomCodes.entries()).map(([code, id]) => ({ code, id })),
+          rooms: Array.from(rooms.entries()).map(([id, room]) => ({ 
+            id, 
+            name: room.name,
+            accessCode: room.accessCode,
+            isPrivate: room.isPrivate,
+            userCount: room.users.size
+          }))
+        });
+      }
+    });
   });
 }
 
@@ -302,17 +456,25 @@ function handleUserLeaveRoom(socket, io, room, user) {
     username: user.username
   });
   
-  // If room is empty, delete it
+  // If room is empty, delete it and its code
   if (room.users.size === 0) {
+    if (room.accessCode) {
+      roomCodes.delete(room.accessCode);
+    }
     rooms.delete(room.id);
     console.log(`Room deleted: ${room.name} (${room.id})`);
     
     // Update rooms list for all users
-    io.emit('rooms_list', Array.from(rooms.values()).map(room => ({
-      id: room.id,
-      name: room.name,
-      userCount: room.users.size
-    })));
+    const publicRooms = Array.from(rooms.values())
+      .filter(r => !r.isPrivate)
+      .map(r => ({
+        id: r.id,
+        name: r.name,
+        userCount: r.users.size,
+        isPrivate: r.isPrivate
+      }));
+      
+    io.emit('rooms_list', publicRooms);
   }
   // If host leaves, assign a new host
   else if (user.userId === room.host) {

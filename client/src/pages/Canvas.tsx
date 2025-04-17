@@ -35,6 +35,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 
 interface Point {
   x: number;
@@ -71,6 +72,7 @@ const Canvas = () => {
   const { toast } = useToast();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const shareInputRef = useRef<HTMLInputElement>(null);
+  const [roomInfo, setRoomInfo] = useState<{name: string, code: string, hostId: string} | null>(null);
   
   // Colors array for the color picker
   const colors = [
@@ -102,6 +104,15 @@ const Canvas = () => {
             description: `You've joined ${response.roomName}`,
             duration: 3000
           });
+          
+          // Store room info for display
+          if (response.roomName) {
+            setRoomInfo({
+              name: response.roomName,
+              code: response.accessCode || roomId,
+              hostId: response.hostId
+            });
+          }
           
           // Load the canvas state from server
           if (response.canvasState && response.canvasState.lines) {
@@ -550,63 +561,17 @@ const Canvas = () => {
             <h1 className="text-2xl font-bold">
               <span className="text-primary">Quick</span>Doodle Canvas
             </h1>
-            {user && (
+            {roomInfo && (
               <div className="text-sm text-muted-foreground hidden md:block">
-                Drawing as: {user.username}
+                Room: {roomInfo.name}
               </div>
             )}
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Share Room Button */}
-            <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
-              <DialogTrigger asChild>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        className="gap-2"
-                      >
-                        <FaShareAlt />
-                        Share
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Share Room</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Share this room</DialogTitle>
-                  <DialogDescription>
-                    Anyone with this link can join your drawing room
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="flex items-center space-x-2 mt-2">
-                  <Input
-                    ref={shareInputRef}
-                    readOnly
-                    value={getRoomShareUrl()}
-                    onClick={(e) => e.currentTarget.select()}
-                    className="flex-1"
-                  />
-                  <Button onClick={copyRoomUrl} className="gap-2">
-                    <FaCopy /> Copy
-                  </Button>
-                </div>
-                <DialogFooter className="mt-4">
-                  <Button variant="secondary" onClick={() => setShareDialogOpen(false)}>
-                    Close
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            {roomId && <UsersList roomId={roomId} roomName={roomInfo?.name} />}
             
-            <UsersList />
+            {roomInfo?.code && <RoomCodeShare roomCode={roomInfo.code} roomName={roomInfo.name} />}
             
             <TooltipProvider>
               <Tooltip>
