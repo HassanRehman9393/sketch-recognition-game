@@ -165,26 +165,26 @@ sketch-recognition-project/
 ### Days 4-7: Canvas Implementation & Socket Integration
 
 **Tasks:**
-1. Create Canvas component
-   - Implement drawing functionality
-   - Add color picker and brush size controls
-   - Implement undo/redo functionality
+1. Set up authentication system
+   - Implement JWT authentication on backend
+   - Create login/register API endpoints
+   - Set up protected routes
 
-2. Set up real-time communication
-   - Configure Socket.io on backend
-   - Implement drawing event broadcasting
-   - Set up room-based connections
-   - Test multi-user interaction
-
-3. Create basic user interface
+2. Create basic user interface
    - Implement navigation and layout
    - Design and implement login/register forms
    - Create user presence indicators
 
-4. Set up authentication system
-   - Implement JWT authentication on backend
-   - Create login/register API endpoints
-   - Set up protected routes
+3. Create Canvas component
+   - Implement drawing functionality
+   - Add color picker and brush size controls
+   - Implement undo/redo functionality
+
+4. Set up real-time communication
+   - Configure Socket.io on backend
+   - Implement drawing event broadcasting
+   - Set up room-based connections
+   - Test multi-user interaction
 
 ### Days 8-11: Python AI Service Implementation
 

@@ -77,12 +77,12 @@ const Home = () => {
   ];
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] pt-6 pb-16 sm:pt-8 sm:pb-20 lg:pt-12 lg:pb-24 overflow-hidden">
+    <div className="relative py-8 md:py-12 lg:py-16 overflow-hidden">
       <AnimatedBackgroundPattern />
       
-      <div className="container px-4 mx-auto relative z-10">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 relative z-10">
         {/* Hero Section - Game-Like Introduction */}
-        <section className="flex flex-col items-center text-center mb-12">
+        <section className="flex flex-col items-center text-center mb-16">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -212,7 +212,7 @@ const Home = () => {
         </section>
         
         {/* Game Modes Section */}
-        <section className="mb-20">
+        <section className="mb-24">
           <motion.h2 
             className="text-3xl sm:text-4xl font-bold text-center mb-12"
             initial={{ opacity: 0 }}
@@ -268,7 +268,7 @@ const Home = () => {
         </section>
         
         {/* Features Section - With Animation */}
-        <section className="mb-20">
+        <section className="mb-24">
           <motion.h2 
             className="text-3xl sm:text-4xl font-bold text-center mb-12"
             initial={{ opacity: 0 }}
@@ -307,7 +307,7 @@ const Home = () => {
         
         {/* Join Now CTA - Game-like Appeal */}
         <motion.section 
-          className="max-w-5xl mx-auto rounded-2xl overflow-hidden"
+          className="max-w-5xl mx-auto rounded-2xl overflow-hidden mb-16"
           initial={{ opacity: 0, y: 40 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7 }}

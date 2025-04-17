@@ -63,7 +63,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (response.success) {
         localStorage.setItem('token', response.token);
         setUser(response.user);
-        navigate('/game');
+        navigate('/game'); // Redirect to the game page with the canvas
       } else {
         throw new Error(response.message || 'Login failed');
       }
