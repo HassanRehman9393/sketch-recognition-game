@@ -1,67 +1,64 @@
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const http = require('http');
+const socketIo = require('socket.io');
 const dotenv = require('dotenv');
-const cookieParser = require('cookie-parser');
-const socketHandlers = require('./socket');
-const authRoutes = require('./routes/auth');
-const gameRoutes = require('./routes/game');
-const aiRoutes = require('./routes/ai');
+const authRoutes = require('./routes/authRoutes');
 
 // Load environment variables
 dotenv.config();
 
-// Initialize Express app
+// Initialize Express
 const app = express();
 const server = http.createServer(app);
 
-// Set up Socket.io with CORS
-const io = new Server(server, {
+// CORS configuration - Updated to allow requests from Vite's default port
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Allow Vite's default port
+  credentials: true
+}));
+
+// Middleware
+app.use(express.json());
+
+// API Routes
+app.use('/api/auth', authRoutes);
+
+// Default route
+app.get('/', (req, res) => {
+  res.send('QuickDoodle API is running...');
+});
+
+// Initialize Socket.io
+const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: process.env.CLIENT_URL || 'http://localhost:5173', // Also update Socket.io CORS
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
-// Middleware
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true
-}));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(cookieParser());
+// Socket.io connections
+io.on('connection', (socket) => {
+  console.log('New client connected');
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/sketch-game')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('Could not connect to MongoDB:', err));
-
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/game', gameRoutes);
-app.use('/api/ai', aiRoutes);
-
-// Initialize Socket.io handlers
-socketHandlers(io);
-
-// Default route
-app.get('/', (req, res) => {
-  res.send('Sketch Recognition Game API is running');
-});
-
-// Start the server
-const PORT = process.env.PORT || 5001; // Changed default from 5000 to 5001
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-}).on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.log(`Port ${PORT} is busy, trying port ${PORT + 1}`);
-    server.listen(PORT + 1);
-  } else {
-    console.error('Server error:', err);
-  }
-});
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('MongoDB Connected');
+    
+    // Start server
+    const PORT = process.env.PORT || 5001;
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('MongoDB connection error:', err.message);
+  });

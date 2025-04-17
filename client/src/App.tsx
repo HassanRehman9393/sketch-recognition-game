@@ -1,45 +1,44 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './components/ui/theme-provider';
-import { Toaster } from "./components/ui/toaster";
+import { AuthProvider } from './contexts/AuthContext';
+import AuthGuard from './components/AuthGuard';
 import Layout from './components/Layout/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import HowToPlay from './pages/HowToPlay';
-import ProtectedRoute from './components/Auth/ProtectedRoute';
-import { AuthProvider } from './contexts/AuthContext';
+
+// If the Game component doesn't exist yet, use this placeholder
+const GamePlaceholder = () => (
+  <div className="container py-12 text-center">
+    <h1 className="text-3xl font-bold mb-4">Game Room</h1>
+    <p className="mb-6">This is where the drawing canvas will be implemented.</p>
+    <p className="text-lg text-green-600 font-semibold">You are successfully authenticated!</p>
+  </div>
+);
 
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="ui-theme">
-      <AuthProvider>
-        <Router>
+      <Router>
+        <AuthProvider>
           <Layout>
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
-              <Route path="/how-to-play" element={<HowToPlay />} />
-              <Route path="/leaderboard" element={
-                <div className="container mx-auto py-12 text-center">
-                  <h1 className="text-3xl font-bold mb-4">Leaderboard</h1>
-                  <p className="text-muted-foreground">Coming soon! Check back later for player rankings.</p>
-                </div>
-              } />
-              <Route path="/game" element={
-                <ProtectedRoute>
-                  <div className="container mx-auto py-12 text-center">
-                    <h1 className="text-3xl font-bold mb-4">Game Room</h1>
-                    <p className="text-muted-foreground">Coming soon! The drawing canvas is under development.</p>
-                  </div>
-                </ProtectedRoute>
-              } />
-              <Route path="*" element={<Home />} />
+              <Route 
+                path="/game" 
+                element={
+                  <AuthGuard>
+                    <GamePlaceholder />
+                  </AuthGuard>
+                } 
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Layout>
-          <Toaster />
-        </Router>
-      </AuthProvider>
+        </AuthProvider>
+      </Router>
     </ThemeProvider>
   );
 }

@@ -1,57 +1,60 @@
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+
+// Helper function to generate JWT
+const generateToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: '30d'
+  });
+};
 
 // Register a new user
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
-    // Check if user already exists
-    const userExists = await User.findOne({ $or: [{ email }, { username }] });
-    if (userExists) {
-      return res.status(400).json({ 
-        message: userExists.email === email ? 'Email already in use' : 'Username already taken' 
+    // Validate input
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide username, email and password'
       });
     }
 
-    // Create new user
+    // Check if user already exists
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { username }] 
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User with this email or username already exists' 
+      });
+    }
+
+    // Create new user with password hashing handled by the User model pre-save hook
     const user = await User.create({
       username,
       email,
       password
     });
 
-    // Generate tokens
-    const accessToken = user.generateAccessToken();
-    const refreshToken = user.generateRefreshToken();
-    
-    // Save refresh token to database
-    user.refreshToken = refreshToken;
-    await user.save();
-
-    // Set refresh token as HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
+    // Return success without token - user must log in after registration
     res.status(201).json({
       success: true,
+      message: 'Registration successful! Please login with your credentials.',
       user: {
-        _id: user._id,
+        id: user._id,
         username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-      },
-      accessToken
+        email: user.email
+      }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Registration error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Error registering user',
-      error: error.message 
+      message: error.message || 'An error occurred during registration'
     });
   }
 };
@@ -61,216 +64,79 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ 
+    // Validate email and password
+    if (!email || !password) {
+      return res.status(400).json({
         success: false,
-        message: 'Invalid email or password' 
+        message: 'Please provide email and password'
       });
     }
 
-    // Check password
+    // Check for user
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Check if password matches
     const isMatch = await user.comparePassword(password);
+
     if (!isMatch) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid email or password' 
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
       });
     }
 
-    // Generate tokens
-    const accessToken = user.generateAccessToken();
-    const refreshToken = user.generateRefreshToken();
-    
-    // Save refresh token to database
-    user.refreshToken = refreshToken;
-    await user.save();
+    // Generate JWT
+    const token = generateToken(user._id);
 
-    // Set refresh token as HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.json({
+    // Return user data and token
+    res.status(200).json({
       success: true,
+      message: 'Login successful',
+      token,
       user: {
-        _id: user._id,
+        id: user._id,
         username: user.username,
         email: user.email,
         avatar: user.avatar,
-      },
-      accessToken
+        stats: user.stats
+      }
     });
   } catch (error) {
-    res.status(500).json({ 
+    console.error('Login error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Server error', 
-      error: error.message 
+      message: error.message || 'An error occurred during login'
     });
   }
 };
 
-// Refresh token
-exports.refreshToken = async (req, res) => {
+// Get current user
+exports.getCurrentUser = async (req, res) => {
   try {
-    const refreshToken = req.cookies.refreshToken;
-    
-    if (!refreshToken) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Refresh token not found' 
-      });
-    }
-
-    // Verify refresh token
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-    
-    // Find user with valid refresh token
-    const user = await User.findOne({ 
-      _id: decoded.id,
-      refreshToken 
-    });
-
-    if (!user) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Invalid refresh token' 
-      });
-    }
-
-    // Generate new tokens
-    const accessToken = user.generateAccessToken();
-    const newRefreshToken = user.generateRefreshToken();
-    
-    // Update refresh token in database
-    user.refreshToken = newRefreshToken;
-    await user.save();
-
-    // Set new refresh token as HTTP-only cookie
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-
-    res.json({
-      success: true,
-      accessToken
-    });
-  } catch (error) {
-    return res.status(403).json({ 
-      success: false, 
-      message: 'Invalid refresh token',
-      error: error.message
-    });
-  }
-};
-
-// Logout
-exports.logout = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refreshToken;
-    
-    if (refreshToken) {
-      // Find user with this refresh token
-      const user = await User.findOne({ refreshToken });
-      
-      if (user) {
-        // Clear refresh token in database
-        user.refreshToken = '';
-        await user.save();
-      }
-    }
-    
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken');
-    
-    res.json({ 
-      success: true, 
-      message: 'Logged out successfully' 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error logging out', 
-      error: error.message 
-    });
-  }
-};
-
-// Get current user profile
-exports.getProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('-password -refreshToken');
+    const user = await User.findById(req.user.id).select('-password');
     
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found' 
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
       });
     }
-    
-    res.json({
+
+    res.status(200).json({
       success: true,
       user
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
-  }
-};
-
-// Update user profile
-exports.updateProfile = async (req, res) => {
-  try {
-    const { username, avatar } = req.body;
-    
-    // Create update object with only allowed fields
-    const updateData = {};
-    if (username) updateData.username = username;
-    if (avatar) updateData.avatar = avatar;
-    
-    // Check if username is already taken
-    if (username) {
-      const existingUser = await User.findOne({ username, _id: { $ne: req.user.id } });
-      if (existingUser) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Username already taken' 
-        });
-      }
-    }
-    
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      updateData,
-      { new: true }
-    ).select('-password -refreshToken');
-    
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found' 
-      });
-    }
-    
-    res.json({
-      success: true,
-      user
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };

@@ -1,144 +1,154 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { FaUser, FaEnvelope, FaLock } from 'react-icons/fa';
+import { useAuth } from '@/contexts/AuthContext';
+import { FaLock, FaEnvelope, FaUser } from 'react-icons/fa';
+import { motion } from 'framer-motion';
 
 const Register = () => {
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: ''
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const navigate = useNavigate();
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const { register, isLoading, error, clearError } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validation
-    if (formData.password !== formData.confirmPassword) {
-      alert("Passwords don't match!");
+    if (password !== confirmPassword) {
+      setPasswordError('Passwords do not match');
       return;
     }
     
-    setIsLoading(true);
-    
-    // In a real app, this would call your registration API
-    setTimeout(() => {
-      setIsLoading(false);
-      // Simulate successful registration
-      navigate('/');
-    }, 1500);
+    await register(username, email, password);
   };
 
   return (
-    <div className="container mx-auto px-4 py-12 flex justify-center items-center min-h-[calc(100vh-14rem)]">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">Create an account</CardTitle>
-          <CardDescription className="text-center">
-            Enter your information to get started with QuickDoodle
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <div className="relative">
-                <FaUser className="absolute left-3 top-3 text-muted-foreground" />
-                <Input
-                  id="username"
-                  name="username"
-                  placeholder="johndoe"
-                  className="pl-10"
-                  value={formData.username}
-                  onChange={handleChange}
-                  disabled={isLoading}
-                  required
-                />
+    <div className="container flex items-center justify-center min-h-[calc(100vh-4rem)] py-8">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md"
+      >
+        <Card className="border-2">
+          <CardHeader className="space-y-1 text-center">
+            <CardTitle className="text-3xl font-bold">Create an account</CardTitle>
+            <CardDescription>
+              Join QuickDoodle to start playing and drawing with friends
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {error && (
+              <div className="bg-red-50 text-red-500 p-3 rounded-md mb-4 text-sm">
+                {error}
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <FaEnvelope className="absolute left-3 top-3 text-muted-foreground" />
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="example@email.com"
-                  className="pl-10"
-                  value={formData.email}
-                  onChange={handleChange}
-                  disabled={isLoading}
-                  required
-                />
+            )}
+            <form onSubmit={handleSubmit}>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <FaUser />
+                    </div>
+                    <Input
+                      id="username"
+                      type="text"
+                      placeholder="johndoe"
+                      className="pl-10"
+                      value={username}
+                      onChange={(e) => {
+                        setUsername(e.target.value);
+                        clearError();
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <FaEnvelope />
+                    </div>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="name@example.com"
+                      className="pl-10"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        clearError();
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <FaLock />
+                    </div>
+                    <Input
+                      id="password"
+                      type="password"
+                      className="pl-10"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setPasswordError('');
+                        clearError();
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                      <FaLock />
+                    </div>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      className={`pl-10 ${passwordError ? 'border-red-500' : ''}`}
+                      value={confirmPassword}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        setPasswordError('');
+                        clearError();
+                      }}
+                      required
+                    />
+                  </div>
+                  {passwordError && (
+                    <p className="text-sm text-red-500">{passwordError}</p>
+                  )}
+                </div>
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? 'Creating account...' : 'Create account'}
+                </Button>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <FaLock className="absolute left-3 top-3 text-muted-foreground" />
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="••••••••"
-                  className="pl-10"
-                  value={formData.password}
-                  onChange={handleChange}
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <div className="relative">
-                <FaLock className="absolute left-3 top-3 text-muted-foreground" />
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  className="pl-10"
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-            </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Creating account...' : 'Create Account'}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter className="flex flex-col gap-4">
-          <div className="text-center w-full">
-            <span className="text-sm text-muted-foreground">
+            </form>
+          </CardContent>
+          <CardFooter className="flex flex-col space-y-4">
+            <div className="text-center text-sm">
               Already have an account?{' '}
-            </span>
-            <Button type="button" variant="link" className="p-0 h-auto" onClick={() => navigate('/login')}>
-              Sign in
-            </Button>
-          </div>
-          <Button variant="outline" type="button" className="w-full" onClick={() => navigate('/')}>
-            Back to Home
-          </Button>
-        </CardFooter>
-      </Card>
+              <Link to="/login" className="text-primary hover:underline">
+                Sign in
+              </Link>
+            </div>
+          </CardFooter>
+        </Card>
+      </motion.div>
     </div>
   );
 };
