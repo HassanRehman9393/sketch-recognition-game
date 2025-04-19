@@ -12,6 +12,7 @@ export interface Room {
 export interface User {
   userId: string;
   username: string;
+  isHost?: boolean; // Add host property
 }
 
 interface CreateRoomOptions {
@@ -30,8 +31,10 @@ interface RoomResponse {
   accessCode?: string;
   error?: string;
   roomName?: string;
+  hostId?: string; // Add hostId property
   users?: User[];
   canvasState?: any;
+  expiresAt?: number; // Add expiration timestamp
 }
 
 export function useRooms() {
@@ -75,8 +78,14 @@ export function useRooms() {
   useEffect(() => {
     if (!socket || !isConnected || !currentRoomId) return;
 
-    const handleRoomUsers = (users: User[]) => {
-      setRoomUsers(users);
+    const handleRoomUsers = (data: { users: User[], hostId: string }) => {
+      // Mark the host in the users list
+      const usersWithHostInfo = data.users.map(user => ({
+        ...user,
+        isHost: user.userId === data.hostId
+      }));
+      
+      setRoomUsers(usersWithHostInfo);
     };
     
     const handleUserJoined = (user: User) => {
@@ -177,9 +186,6 @@ export function useRooms() {
           
           if (response.success) {
             setCurrentRoomId(response.roomId!);
-            if (response.users) {
-              setRoomUsers(response.users);
-            }
             resolve(response);
           } else {
             reject(new Error(response.error || 'Failed to join room'));

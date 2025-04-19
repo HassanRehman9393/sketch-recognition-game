@@ -182,8 +182,7 @@ function initializeSocket(io) {
       // Add user to room
       socket.join(roomId);
       room.users.set(user.userId, { 
-        userId: user.userId,
-        username: user.username,
+        ...user,
         position: { x: 0, y: 0 }
       });
       
@@ -198,15 +197,15 @@ function initializeSocket(io) {
       // Send current canvas state to the new user
       socket.emit('canvas_state', room.canvasState);
       
-      // Send list of room users to the new user along with host info
-      socket.emit('room_users', 
-        Array.from(room.users.values()).map(user => ({
+      // Send list of room users to the new user
+      socket.emit('room_users', {
+        users: Array.from(room.users.values()).map(user => ({
           userId: user.userId,
           username: user.username,
           position: user.position
-        })), 
-        { hostId: room.host }
-      );
+        })),
+        hostId: room.host // Include the host ID
+      });
       
       if (callback) {
         callback({ 
@@ -215,7 +214,7 @@ function initializeSocket(io) {
           roomName: room.name,
           accessCode: room.accessCode,
           isPrivate: room.isPrivate,
-          hostId: room.host,
+          hostId: room.host, // Include host ID in the response
           users: Array.from(room.users.values()).map(user => ({
             userId: user.userId,
             username: user.username
@@ -224,29 +223,7 @@ function initializeSocket(io) {
         });
       }
     });
-
-    // Add a handler for getting room info
-    socket.on('get_room_info', ({ roomId }, callback) => {
-      const room = rooms.get(roomId);
-      
-      if (!room) {
-        if (callback) callback({ success: false, error: 'Room not found' });
-        return;
-      }
-      
-      if (callback) {
-        callback({
-          success: true,
-          roomName: room.name,
-          hostId: room.host,
-          users: Array.from(room.users.values()).map(user => ({
-            userId: user.userId,
-            username: user.username
-          }))
-        });
-      }
-    });
-
+    
     // Drawing events
     socket.on('draw_start', ({ roomId, point, color, width }) => {
       const room = rooms.get(roomId);
@@ -323,7 +300,7 @@ function initializeSocket(io) {
       // Check if there are lines to undo
       if (room.canvasState.lines.length > 0) {
         // Find the last line drawn by this user
-        for (let i = room.canvasState.lines.length - 1; i >= 0; i--) {
+        for (let i = room.canvasState.lines.length - 0; i >= 0; i--) {
           if (room.canvasState.lines[i].userId === user.userId) {
             // Move the line from lines array to undoStack
             const removedLine = room.canvasState.lines.splice(i, 1)[0];

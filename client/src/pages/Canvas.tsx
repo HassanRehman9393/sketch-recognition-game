@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
+import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
 
 interface Point {
   x: number;
@@ -72,7 +73,7 @@ const Canvas = () => {
   const { toast } = useToast();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const shareInputRef = useRef<HTMLInputElement>(null);
-  const [roomInfo, setRoomInfo] = useState<{name: string, code: string, hostId: string} | null>(null);
+  const [roomInfo, setRoomInfo] = useState<{name: string, code: string} | null>(null);
   
   // Colors array for the color picker
   const colors = [
@@ -109,8 +110,7 @@ const Canvas = () => {
           if (response.roomName) {
             setRoomInfo({
               name: response.roomName,
-              code: response.accessCode || roomId,
-              hostId: response.hostId
+              code: response.accessCode || roomId
             });
           }
           
@@ -561,17 +561,20 @@ const Canvas = () => {
             <h1 className="text-2xl font-bold">
               <span className="text-primary">Quick</span>Doodle Canvas
             </h1>
-            {roomInfo && (
+            {user && (
               <div className="text-sm text-muted-foreground hidden md:block">
-                Room: {roomInfo.name}
+                Drawing as: {user.username}
               </div>
             )}
           </div>
           
           <div className="flex items-center gap-2">
-            {roomId && <UsersList roomId={roomId} roomName={roomInfo?.name} />}
+            {roomInfo && roomInfo.code && (
+              <RoomCodeShare roomCode={roomInfo.code} roomName={roomInfo.name} />
+            )}
             
-            {roomInfo?.code && <RoomCodeShare roomCode={roomInfo.code} roomName={roomInfo.name} />}
+            {/* Add UsersList component to display host and members */}
+            <UsersList />
             
             <TooltipProvider>
               <Tooltip>
