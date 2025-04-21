@@ -50,6 +50,7 @@ __pycache__/
 .Python
 env/
 venv/
+venv_tf/
 ENV/
 env.bak/
 venv.bak/
@@ -64,20 +65,31 @@ htmlcov/
 .pytest_cache/
 cover/
 
-# TensorFlow models
+# TensorFlow models and generated files
 ai-service/app/models/quickdraw/*.h5
 ai-service/app/models/quickdraw/*.pb
 ai-service/app/models/quickdraw/*.tflite
+ai-service/app/models/quickdraw/*.json
+ai-service/app/models/quickdraw/*.png
+ai-service/app/models/quickdraw/logs/
 
 # Dataset files
-ai-service/app/datasets/
 ai-service/app/datasets/raw/
 ai-service/app/datasets/processed/
 *.ndjson
 *_3000.ndjson
+ai-service/app/datasets/raw/backup/
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
 
 # MongoDB local db
 /data/db/
+
+# Temporary files
+*.temp
+*.tmp
+*.bak
+
+# Local development files
+local_settings.py
