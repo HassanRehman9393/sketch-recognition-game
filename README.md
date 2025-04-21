@@ -48,12 +48,12 @@ npm run dev
 cd ai-service
 
 # On Windows:
-python -m venv venv
-venv\Scripts\activate
+python -m venv venv_tf
+venv_tf\Scripts\activate
 
 # On macOS/Linux:
-# python -m venv venv
-# source venv/bin/activate
+# python3.10 -m venv venv_tf
+# source venv_tf/bin/activate
 ```
 
 #### 2. Install Dependencies
@@ -61,25 +61,26 @@ venv\Scripts\activate
 ```bash
 # Make sure you're in the activated virtual environment
 pip install -r requirements.txt
+```
 
-# If TensorFlow installation fails, try these alternatives:
-# pip install tensorflow-cpu==2.7.0
-# or
-# pip install onnxruntime scikit-learn
+For specific TensorFlow compatibility issues:
+```bash
+# Fix for common incompatibility issues
+pip install flask==2.0.3 werkzeug==2.0.3 tensorflow-cpu==2.10.0 protobuf==3.20.3
 ```
 
 #### 3. Download Dataset
 
-Download the Quick Draw dataset (limited to 3000 images per category for manageable training):
+Download the Quick Draw dataset (limited to 3000 images per category):
 
 ```bash
 # List available categories
 python download_dataset.py --list
 
 # Download specific categories
-python download_dataset.py --categories apple cat house
+python download_dataset.py --categories apple bicycle car cat chair dog
 
-# Download all default categories
+# Download all default categories (14 categories)
 python download_dataset.py --all
 ```
 
@@ -88,14 +89,11 @@ python download_dataset.py --all
 Process the raw dataset into training, validation, and test sets:
 
 ```bash
-# Process specific categories (limit to 1000 samples per category)
-python process_dataset.py --categories apple cat house --max-samples 1000
+# Process specific categories
+python process_dataset.py --categories apple bicycle car cat chair dog --visualize
 
 # Process all available categories
-python process_dataset.py --all --max-samples 1000
-
-# Only split existing processed data without reprocessing
-python process_dataset.py --split-only
+python process_dataset.py --all --visualize
 ```
 
 #### 5. Train the Model
@@ -103,167 +101,175 @@ python process_dataset.py --split-only
 Train a CNN model on the processed dataset:
 
 ```bash
-# Train a simple CNN model
-python train_model.py --model-type simple --epochs 20 --batch-size 64
+# Train a simple CNN model (fastest)
+python train_model.py --model-type simple --epochs 10 --batch-size 64
 
-# Train a more advanced CNN with residual connections
-python train_model.py --model-type advanced --epochs 30 --batch-size 32
+# Train a more advanced CNN with residual connections (better accuracy)
+python train_model.py --model-type advanced --epochs 20 --batch-size 32
 
-# Use MobileNetV2 transfer learning approach (requires more memory)
+# Use MobileNetV2 transfer learning approach (best accuracy)
 python train_model.py --model-type mobilenet --epochs 15 --batch-size 32
 ```
 
 Additional training options:
 ```bash
-# Limit data for quick testing
-python train_model.py --max-per-class 200
-
-# Specify GPU to use (if you have multiple)
-python train_model.py --gpu 0
-
-# Disable data augmentation
-python train_model.py --no-augmentation
+# Train with limited data for quick testing
+python train_model.py --model-type simple --epochs 5 --max-per-class 200
 ```
 
 #### 6. Interactive Training with Jupyter Notebook
 
-For more detailed analysis and visualization during training:
+For interactive training with visualizations:
 
 ```bash
 # Start Jupyter notebook
 jupyter notebook
 ```
 
-Then open the `notebooks/model_training.ipynb` notebook to run the training interactively.
+Then open the `notebooks/model_training.ipynb` notebook to run training with detailed visualizations.
+
+#### 7. Start the Flask Service
+
+Run the Flask server for sketch recognition:
+
+```bash
+# Start with the trained model
+python main.py
+```
+
+The service will be available at http://localhost:5002 by default.
 
 ## Development Progress
 
 ### Completed
 - ✅ Project structure setup and configuration
-- ✅ Environment setup for client, server, and AI service
-- ✅ Basic Flask API setup for the AI service
-- ✅ Dataset download functionality with customizable category selection
-- ✅ Download script with built-in limitations (3000 images per category)
-- ✅ Image processing utilities for sketch normalization
-- ✅ Data backup functionality for downloaded categories
-- ✅ Raw dataset processing pipeline
-   - ✅ Parse NDJSON files to extract stroke data
-   - ✅ Convert strokes to normalized images
-   - ✅ Visualize processed drawings
-   - ✅ Split data into training/validation/test sets
-- ✅ CNN model architecture implementation
-   - ✅ Simple CNN architecture
-   - ✅ Advanced CNN with residual connections
-   - ✅ Transfer learning with MobileNetV2
-- ✅ Model training pipeline
-   - ✅ Data loading and batch generation
-   - ✅ Training with validation
-   - ✅ Model evaluation and metrics
-   - ✅ Training visualization
-   - ✅ Model saving with metadata
+- ✅ Environment setup for all components
+- ✅ Dataset download pipeline with 14 categories
+- ✅ Raw dataset processing (NDJSON parsing, stroke rendering)
+- ✅ Data splitting (train/validation/test)
+- ✅ Multiple CNN model architectures:
+  - ✅ Simple CNN (3 conv layers with batch normalization)
+  - ✅ Advanced CNN (residual connections, deeper)
+  - ✅ MobileNetV2 transfer learning
+- ✅ Model training pipeline with:
+  - ✅ Early stopping and checkpointing
+  - ✅ Learning rate scheduling
+  - ✅ Data augmentation
+  - ✅ Training history visualization
+- ✅ Model evaluation metrics (accuracy, confusion matrix)
+- ✅ TensorFlow Lite model conversion
+- ✅ Basic Flask API structure
+- ✅ Documentation and setup guides
+
+### Latest Achievements
+- ✅ Successfully trained Simple CNN model with 64.48% validation accuracy
+- ✅ Implemented automated model checkpointing and visualization
+- ✅ Solved TensorFlow and Flask compatibility issues
+- ✅ Created comprehensive model training notebook
+- ✅ Optimized dataset pipeline for lower memory usage
 
 ### In Progress
-- 🔄 Inference pipeline implementation
-- 🔄 Canvas component implementation
-- 🔄 Real-time communication setup
-
-### Coming Soon
-- ⏳ API endpoints for recognition
-- ⏳ User authentication
-- ⏳ Game mode implementation
-- ⏳ Full integration of all components
+- 🔄 Inference API endpoint integration
+- 🔄 Real-time sketch recognition implementation
+- 🔄 TensorFlow Lite model serving optimization
+- 🔄 Training Advanced CNN and MobileNetV2 models
+- 🔄 Client-side sketch-to-input conversion
 
 ## Training Results
 
-The model training pipeline supports three different CNN architectures:
+Our initial training run with the Simple CNN architecture achieved promising results:
 
-1. **Simple CNN**: 93-95% accuracy on the test set
-   - Fast training time (~15 minutes on CPU)
-   - Model size: ~5MB
-   - Good for quick iterations and testing
+| Model Type | Training Accuracy | Validation Accuracy | Training Time | Epochs |
+|------------|------------------|---------------------|---------------|--------|
+| Simple CNN | 59.0%            | 64.48%              | 377s (~6.3m)  | 10     |
 
-2. **Advanced CNN**: 96-97% accuracy on the test set
-   - Moderate training time (~30 minutes on CPU)
-   - Model size: ~15MB
-   - Recommended for production use
+The model showed consistent improvement throughout training:
+- Starting at 24.9% accuracy in epoch 1
+- Reaching 64.48% validation accuracy by epoch 7
+- Early stopping triggered after epoch 10, restoring best weights
 
-3. **MobileNetV2**: 95-98% accuracy on the test set
-   - Longer training time (~45 minutes on CPU)
-   - Model size: ~9MB (after optimization)
-   - Best accuracy, especially with limited training data
+**Next Steps:**
+1. Train with more epochs to further improve accuracy
+2. Experiment with advanced architectures
+3. Implement the inference pipeline for real-time recognition
 
-Training metrics are automatically visualized and saved:
-- Accuracy and loss curves
-- Confusion matrix
-- Example predictions
+## Model Architecture Details
 
-## Data Management
+### Simple CNN Architecture
+```
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #   
+=================================================================
+Input                       (None, 28, 28, 1)          0         
+Conv2D                      (None, 26, 26, 32)         320       
+MaxPooling2D               (None, 13, 13, 32)         0         
+BatchNormalization         (None, 13, 13, 32)         128       
+Conv2D                      (None, 11, 11, 64)         18,496    
+MaxPooling2D               (None, 5, 5, 64)           0         
+BatchNormalization         (None, 5, 5, 64)           256       
+Conv2D                      (None, 3, 3, 128)          73,856    
+MaxPooling2D               (None, 1, 1, 128)          0         
+BatchNormalization         (None, 1, 1, 128)          512       
+Flatten                     (None, 128)                0         
+Dropout                     (None, 128)                0         
+Dense                       (None, 256)                33,024    
+BatchNormalization         (None, 256)                1,024     
+Dropout                     (None, 256)                0         
+Dense                       (None, 14)                 3,598     
+=================================================================
+Total params: 131,214
+Trainable params: 130,254
+Non-trainable params: 960
+```
 
-The project uses the Google Quick Draw dataset:
+## Dataset Information
 
-- Each category contains thousands of drawings
-- We limit to 3000 images per category for efficient training
-- The raw data is stored in NDJSON files
-- Each drawing contains stroke data (X,Y coordinates)
-- Processed data is split into:
-  - 70% training set
-  - 15% validation set
-  - 15% test set
+The project uses the Google Quick Draw dataset with 14 categories:
+- airplane, apple, bicycle, car, cat, chair, clock, dog, face, fish, house, star, tree, umbrella
 
-## Model Architectures
+Each category includes 3,000 drawing samples, for a total of 42,000 sketches.
 
-Three different CNN architectures are available:
-
-1. **Simple CNN**: Basic architecture with 3 convolutional layers
-2. **Advanced CNN**: Deeper architecture with residual connections
-3. **MobileNetV2**: Transfer learning based architecture
-
-## Technology Stack
-
-### Frontend
-- React, React Router, Context API
-- HTML5 Canvas API
-- Tailwind CSS, shadcn/ui
-- Socket.io-client
-
-### Backend
-- Node.js, Express.js
-- Socket.io
-- MongoDB, Mongoose
-- JWT Authentication
-
-### AI Service
-- Flask
-- TensorFlow/ONNX Runtime
-- NumPy, Pandas, Matplotlib
-- OpenCV for image processing
-- Quick, Draw! Dataset
+**Dataset Split:**
+- Training: 29,400 images (70%)
+- Validation: 6,300 images (15%)
+- Test: 6,300 images (15%)
 
 ## Troubleshooting
 
-### Common Issues
+### TensorFlow Installation
 
-**Virtual Environment Activation**
-- Use `venv\Scripts\activate` on Windows
-- Use `source venv/bin/activate` on macOS/Linux
+If you encounter TensorFlow installation issues:
 
-**TensorFlow Installation**
-- If installation fails, try `pip install tensorflow-cpu==2.7.0`
-- Alternative: Use ONNX Runtime as specified in the requirements.txt
+```bash
+# For Windows with Python 3.8-3.10:
+pip install tensorflow-cpu==2.10.0 protobuf==3.20.3
 
-**Dataset Download**
-- Ensure you have sufficient disk space (~3MB per category with 3000 image limit)
-- If download fails, try with fewer categories first
+# For Flask compatibility issues:
+pip install flask==2.0.3 werkzeug==2.0.3
+```
 
-**Dataset Processing**
-- If you encounter memory issues, reduce the --max-samples parameter
-- Use --visualize to generate example visualizations or --no-visualize to disable them
+### Common Python Environment Issues
 
-**Model Training**
-- For memory issues, reduce batch size (--batch-size 32 or lower)
-- For faster testing, use --max-per-class to limit the dataset size
-- If you have a GPU, ensure TensorFlow can detect it
-- If training is unstable, reduce learning rate with --learning-rate 0.0005
+- **"ModuleNotFoundError: No module named 'tensorflow'"**:
+  - Ensure you've activated the virtual environment
+  - Try reinstalling with `pip install tensorflow-cpu==2.10.0`
+
+- **"No module named 'app'"**:
+  - Run Python from the project root directory
+  - Ensure `app` directory contains `__init__.py`
+
+- **"Error: cannot import name 'url_quote' from 'werkzeug.urls'"**:
+  - Downgrade Werkzeug: `pip install werkzeug==2.0.3 flask==2.0.3`
+
+### Dataset Processing Issues
+
+- **"MemoryError" during processing**:
+  - Reduce batch size or process fewer categories at a time
+  - Use `--max-samples` to limit samples per category
+
+- **Disk space warnings**:
+  - Each category requires ~250MB for raw data
+  - Check disk space before downloading all categories
 
 ## License
 
