@@ -3,6 +3,38 @@ from flask_cors import CORS
 import json
 import random
 import time
+import os
+from pathlib import Path
+
+# Create necessary directories
+def create_app_directories():
+    # Define base paths
+    base_dir = Path(__file__).parent
+    
+    # Create dataset directories
+    datasets_dir = base_dir / "datasets"
+    raw_dir = datasets_dir / "raw"
+    processed_dir = datasets_dir / "processed"
+    backup_dir = datasets_dir / "raw" / "backup"
+    
+    # Create directories if they don't exist
+    for directory in [datasets_dir, raw_dir, processed_dir, backup_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+    
+    # Create models directory
+    models_dir = base_dir / "models" / "quickdraw"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    
+    return {
+        'datasets_dir': str(datasets_dir),
+        'raw_dir': str(raw_dir),
+        'processed_dir': str(processed_dir),
+        'backup_dir': str(backup_dir),
+        'models_dir': str(models_dir)
+    }
+
+# Create directories when module is imported
+app_directories = create_app_directories()
 
 def create_app():
     app = Flask(__name__)

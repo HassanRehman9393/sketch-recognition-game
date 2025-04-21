@@ -21,7 +21,7 @@ The project consists of three main components:
 ### Prerequisites
 
 - Node.js (v14 or higher)
-- Python (v3.8 or higher)
+- Python (v3.8-3.10 recommended for TensorFlow compatibility)
 - MongoDB
 
 ### Client Setup
@@ -42,19 +42,77 @@ npm run dev
 
 ### AI Service Setup
 
+#### 1. Create Virtual Environment
+
 ```bash
 cd ai-service
-# Create and activate virtual environment
-python -m venv venv
-# On Windows
-venv\Scripts\activate
-# On macOS/Linux
-# source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-python main.py
+# On Windows:
+python -m venv venv
+venv\Scripts\activate
+
+# On macOS/Linux:
+# python -m venv venv
+# source venv/bin/activate
 ```
+
+#### 2. Install Dependencies
+
+```bash
+# Make sure you're in the activated virtual environment
+pip install -r requirements.txt
+
+# If TensorFlow installation fails, try these alternatives:
+# pip install tensorflow-cpu==2.7.0
+# or
+# pip install onnxruntime scikit-learn
+```
+
+#### 3. Download Dataset
+
+Download the Quick Draw dataset (limited to 3000 images per category for manageable training):
+
+```bash
+# List available categories
+python download_dataset.py --list
+
+# Download specific categories
+python download_dataset.py --categories apple cat house
+
+# Download all default categories
+python download_dataset.py --all
+```
+
+## Development Progress
+
+### Completed
+- ✅ Project structure setup and configuration
+- ✅ Environment setup for client, server, and AI service
+- ✅ Basic Flask API setup for the AI service
+- ✅ Dataset download functionality with customizable category selection
+- ✅ Download script with built-in limitations (3000 images per category)
+- ✅ Image processing utilities for sketch normalization
+- ✅ Data backup functionality for downloaded categories
+
+### In Progress
+- 🔄 Processing raw dataset into training format
+- 🔄 Canvas component implementation
+- 🔄 Real-time communication setup
+
+### Coming Soon
+- ⏳ Model training with the Quick Draw dataset
+- ⏳ User authentication
+- ⏳ Game mode implementation
+- ⏳ Full integration of all components
+
+## Data Management
+
+The project uses the Google Quick Draw dataset:
+
+- Each category contains thousands of drawings
+- We limit to 3000 images per category for efficient training
+- The raw data is stored in NDJSON files
+- Each drawing contains stroke data (X,Y coordinates)
 
 ## Technology Stack
 
@@ -72,9 +130,26 @@ python main.py
 
 ### AI Service
 - Flask
-- TensorFlow
-- NumPy
+- TensorFlow/ONNX Runtime
+- NumPy, Pandas
+- OpenCV for image processing
 - Quick, Draw! Dataset
+
+## Troubleshooting
+
+### Common Issues
+
+**Virtual Environment Activation**
+- Use `venv\Scripts\activate` on Windows
+- Use `source venv/bin/activate` on macOS/Linux
+
+**TensorFlow Installation**
+- If installation fails, try `pip install tensorflow-cpu==2.7.0`
+- Alternative: Use ONNX Runtime as specified in the requirements.txt
+
+**Dataset Download**
+- Ensure you have sufficient disk space (~3MB per category with 3000 image limit)
+- If download fails, try with fewer categories first
 
 ## License
 

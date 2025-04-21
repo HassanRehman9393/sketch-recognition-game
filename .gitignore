@@ -69,5 +69,15 @@ ai-service/app/models/quickdraw/*.h5
 ai-service/app/models/quickdraw/*.pb
 ai-service/app/models/quickdraw/*.tflite
 
+# Dataset files
+ai-service/app/datasets/
+ai-service/app/datasets/raw/
+ai-service/app/datasets/processed/
+*.ndjson
+*_3000.ndjson
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
 # MongoDB local db
 /data/db/
