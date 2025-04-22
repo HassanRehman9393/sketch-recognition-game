@@ -144,58 +144,72 @@ class QuickDrawModelBuilder:
         self.model = model
         return model
     
-    def build_mobilenet_based(self, num_classes):
+    def build_mobilenet_based(self, num_classes, input_shape=(28, 28, 1)):
         """
-        Build a model based on MobileNetV2 architecture with transfer learning
+        Build a sketch recognition model based on MobileNetV2
         
         Args:
             num_classes (int): Number of output classes
+            input_shape (tuple): Input shape (defaults to 28x28x1)
             
         Returns:
-            tf.keras.Model: Compiled model
+            tf.keras.Model: MobileNetV2-based model
         """
-        logger.info(f"Building MobileNetV2-based model with {num_classes} output classes")
+        self.logger.info(f"Building MobileNetV2-based model with {num_classes} output classes")
         
-        # Load the MobileNetV2 model without the classification layers
+        # MobileNetV2 expects 3-channel input, so we need to adapt our grayscale images
+        if input_shape[-1] == 1:
+            # Create input layer that accepts grayscale images
+            inputs = tf.keras.layers.Input(shape=input_shape)
+            
+            # Convert single-channel grayscale to 3-channel by repeating the channel
+            # This works better than random initialization for transfer learning
+            x = tf.keras.layers.Concatenate()([inputs, inputs, inputs])
+            
+            # Resize to match MobileNetV2 expected input size (96x96)
+            # Nearest neighbor is used to preserve the binary sketch-like nature
+            x = tf.keras.layers.Resizing(96, 96, interpolation='nearest')(x)
+        else:
+            # For RGB images, just resize
+            inputs = tf.keras.layers.Input(shape=input_shape)
+            x = tf.keras.layers.Resizing(96, 96)(inputs)
+        
+        # Load pre-trained MobileNetV2 without top layers
         base_model = tf.keras.applications.MobileNetV2(
-            input_shape=(96, 96, 3),  # Standard input size for MobileNetV2
+            input_shape=(96, 96, 3),
             include_top=False,
-            weights='imagenet'
+            weights='imagenet',
+            input_tensor=None,
+            pooling='avg',
+            alpha=1.0
         )
         
         # Freeze the base model layers
         base_model.trainable = False
         
-        # Create new model on top
-        inputs = layers.Input(shape=self.input_shape)
+        # Connect the base model
+        x = base_model(x)
         
-        # Convert grayscale to RGB and resize to 96x96 for MobileNetV2
-        x = layers.experimental.preprocessing.Resizing(96, 96)(inputs)
-        x = layers.Concatenate()([x, x, x])  # Replicate grayscale channel to 3 channels
+        # Add custom top layers
+        x = tf.keras.layers.Dropout(0.2)(x)
+        x = tf.keras.layers.Dense(256, activation='relu')(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Dropout(0.5)(x)
         
-        # Pass the processed input to MobileNetV2
-        x = base_model(x, training=False)
-        x = layers.GlobalAveragePooling2D()(x)
-        x = layers.Dropout(0.2)(x)
-        x = layers.Dense(256, activation='relu')(x)
-        outputs = layers.Dense(num_classes, activation='softmax')(x)
+        # Output layer with softmax activation
+        outputs = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
         
-        # Assemble the full model
-        model = models.Model(inputs, outputs)
+        # Create the model
+        model = tf.keras.Model(inputs=inputs, outputs=outputs)
         
         # Compile model
         model.compile(
-            optimizer=optimizers.Adam(learning_rate=0.0005),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
         
-        # Save model summary to string
-        model_summary = []
-        model.summary(print_fn=lambda x: model_summary.append(x))
-        logger.info("Model architecture:\n" + "\n".join(model_summary))
-        
-        self.model = model
+        model.summary(line_length=100)
         return model
     
     def train(self, train_data, validation_data, epochs=20, batch_size=64, callbacks_list=None):

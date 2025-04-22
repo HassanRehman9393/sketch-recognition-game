@@ -106,21 +106,69 @@ def load_model_with_metadata(model_path):
         tuple: (model, metadata)
     """
     # Load the model
-    model = tf.keras.models.load_model(model_path)
+    try:
+        model = tf.keras.models.load_model(model_path)
+        logger.info(f"Successfully loaded model from {model_path}")
+    except Exception as e:
+        logger.error(f"Error loading model: {str(e)}")
+        return None, None
     
-    # Generate metadata path from model path
+    # Generate metadata path from model path - try multiple conventions
+    metadata = None
+    
+    # Convention 1: same filename with _metadata suffix
     if model_path.endswith('.h5'):
         metadata_path = model_path.replace('.h5', '_metadata.json')
-    else:
-        metadata_path = f"{model_path}_metadata.json"
+        if os.path.exists(metadata_path):
+            with open(metadata_path, 'r') as f:
+                try:
+                    metadata = json.load(f)
+                    logger.info(f"Loaded metadata from {metadata_path}")
+                    return model, metadata
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in metadata file: {metadata_path}")
     
-    # Load metadata if it exists
-    metadata = None
+    # Convention 2: same filename with .json extension
+    if model_path.endswith('.h5'):
+        metadata_path = model_path.replace('.h5', '.json')
+        if os.path.exists(metadata_path):
+            with open(metadata_path, 'r') as f:
+                try:
+                    metadata = json.load(f)
+                    logger.info(f"Loaded metadata from {metadata_path}")
+                    return model, metadata
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in metadata file: {metadata_path}")
+    
+    # Convention 3: hardcoded '_metadata.json' suffix
+    metadata_path = f"{model_path}_metadata.json"
     if os.path.exists(metadata_path):
         with open(metadata_path, 'r') as f:
-            metadata = json.load(f)
+            try:
+                metadata = json.load(f)
+                logger.info(f"Loaded metadata from {metadata_path}")
+                return model, metadata
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in metadata file: {metadata_path}")
     
-    return model, metadata
+    # If no metadata found, check for any JSON file with similar name
+    model_dir = os.path.dirname(model_path)
+    model_name = os.path.basename(model_path).split('.')[0]
+    potential_metadata_files = glob.glob(os.path.join(model_dir, f"{model_name}*.json"))
+    
+    if potential_metadata_files:
+        # Use the first matching metadata file
+        with open(potential_metadata_files[0], 'r') as f:
+            try:
+                metadata = json.load(f)
+                logger.info(f"Loaded metadata from {potential_metadata_files[0]}")
+                return model, metadata
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON in metadata file: {potential_metadata_files[0]}")
+    
+    # If we got here, no valid metadata was found
+    logger.warning(f"No metadata file found for model: {model_path}")
+    return model, None
 
 def convert_model_to_tflite(model, tflite_path, quantize=True):
     """
