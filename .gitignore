@@ -66,19 +66,19 @@ htmlcov/
 cover/
 
 # TensorFlow models and generated files
-ai-service/app/models/quickdraw/*.h5
-ai-service/app/models/quickdraw/*.pb
-ai-service/app/models/quickdraw/*.tflite
-ai-service/app/models/quickdraw/*.json
-ai-service/app/models/quickdraw/*.png
-ai-service/app/models/quickdraw/logs/
+ai-service/models/quickdraw/*.h5
+ai-service/models/quickdraw/*.pb
+ai-service/models/quickdraw/*.tflite
+ai-service/models/quickdraw/*.json
+ai-service/models/quickdraw/*.png
+ai-service/models/quickdraw/logs/
 
 # Dataset files
-ai-service/app/datasets/raw/
-ai-service/app/datasets/processed/
+ai-service/data/raw/
+ai-service/data/processed/
 *.ndjson
 *_3000.ndjson
-ai-service/app/datasets/raw/backup/
+ai-service/data/raw/backup/
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
@@ -93,3 +93,7 @@ ai-service/app/datasets/raw/backup/
 
 # Local development files
 local_settings.py
+
+ai-service/__pycache__/
+ai-service/app/__pycache__/
+ai-service/app/*/__pycache__/

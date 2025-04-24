@@ -1,0 +1,49 @@
+{
+    "input_shape": [
+        28,
+        28,
+        1
+    ],
+    "timestamp": "2025-04-24 09:27:20",
+    "num_classes": 14,
+    "class_names": [
+        "airplane_3000",
+        "apple_3000",
+        "bicycle_3000",
+        "car_3000",
+        "cat_3000",
+        "chair_3000",
+        "clock_3000",
+        "dog_3000",
+        "face_3000",
+        "fish_3000",
+        "house_3000",
+        "star_3000",
+        "tree_3000",
+        "umbrella_3000"
+    ],
+    "model_type": "mobilenet",
+    "config": {
+        "model_type": "mobilenet",
+        "epochs": 20,
+        "batch_size": 32,
+        "learning_rate": 0.0005,
+        "max_per_class": null,
+        "augmentation": true,
+        "confusion_matrix": false,
+        "convert_tflite": false,
+        "quantize": false
+    },
+    "metrics": {
+        "accuracy": 0.7249206304550171,
+        "loss": 0.8942938446998596
+    },
+    "training_time_seconds": 44680.612719774246,
+    "training_history": {
+        "accuracy": 0.7574149370193481,
+        "val_accuracy": 0.7161904573440552,
+        "loss": 0.7656829357147217,
+        "val_loss": 0.898025631904602,
+        "epochs_trained": 15
+    }
+}
