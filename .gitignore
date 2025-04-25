@@ -66,12 +66,12 @@ htmlcov/
 cover/
 
 # TensorFlow models and generated files
-ai-service/models/quickdraw/*.h5
-ai-service/models/quickdraw/*.pb
-ai-service/models/quickdraw/*.tflite
-ai-service/models/quickdraw/*.json
-ai-service/models/quickdraw/*.png
-ai-service/models/quickdraw/logs/
+ai-service/app/models/quickdraw/*.h5
+ai-service/app/models/quickdraw/*.pb
+ai-service/app/models/quickdraw/*.tflite
+ai-service/app/models/quickdraw/*.json
+ai-service/app/models/quickdraw/*.png
+ai-service/app/models/quickdraw/logs/
 
 # Dataset files
 ai-service/data/raw/
