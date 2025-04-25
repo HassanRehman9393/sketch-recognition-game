@@ -425,3 +425,57 @@ def convert_model_to_tflite(model, output_path=None, quantize=True):
     except Exception as e:
         logger.error(f"Error converting model: {str(e)}")
         return None
+
+def save_model_with_metadata(model, model_path, metadata=None):
+    """
+    Save a TensorFlow model along with its metadata in a separate JSON file
+    
+    Args:
+        model (tf.keras.Model): The model to save
+        model_path (str): Path where to save the model
+        metadata (dict, optional): Model metadata to save alongside the model
+        
+    Returns:
+        dict: Dictionary containing paths to saved files
+    """
+    # Ensure the directory exists
+    model_dir = os.path.dirname(model_path)
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Save the model
+    model.save(model_path)
+    logger.info(f"Model saved to {model_path}")
+    
+    # Save metadata if provided
+    result = {'model_path': model_path}
+    
+    if metadata:
+        # Convert any non-serializable data
+        def ensure_serializable(obj):
+            if isinstance(obj, (np.integer, np.floating)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            else:
+                return obj
+        
+        # Process the metadata dictionary recursively
+        def process_dict(d):
+            for key, value in d.items():
+                if isinstance(value, dict):
+                    d[key] = process_dict(value)
+                else:
+                    d[key] = ensure_serializable(value)
+            return d
+        
+        metadata = process_dict(metadata)
+        
+        # Save metadata to JSON file
+        metadata_path = str(model_path).replace('.h5', '.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
+        
+        logger.info(f"Model metadata saved to {metadata_path}")
+        result['metadata_path'] = metadata_path
+    
+    return result

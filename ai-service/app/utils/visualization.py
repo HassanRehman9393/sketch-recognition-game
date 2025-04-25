@@ -150,3 +150,49 @@ def visualize_model_predictions(model, images, true_labels, class_names, num_ima
         
     plt.tight_layout()
     return fig
+
+def visualize_feature_maps(model, image, layer_name, max_features=16):
+    """
+    Visualize feature maps from a specific layer for a given input image.
+    
+    Args:
+        model: Trained model
+        image: Input image (should match model's input shape)
+        layer_name: Name of the layer to visualize
+        max_features: Maximum number of feature maps to display
+    """
+    # Create a model that will output the feature maps
+    feature_model = tf.keras.Model(inputs=model.input, 
+                                 outputs=model.get_layer(layer_name).output)
+    
+    # Expand dimensions if needed
+    if len(image.shape) == 3:
+        image = np.expand_dims(image, axis=0)
+    
+    # Get feature maps
+    feature_maps = feature_model.predict(image)
+    
+    # Determine grid size for plotting
+    n_features = min(max_features, feature_maps.shape[-1])
+    grid_size = int(np.ceil(np.sqrt(n_features)))
+    
+    # Create figure
+    fig, axes = plt.subplots(grid_size, grid_size, figsize=(12, 12))
+    axes = axes.flatten()
+    
+    # Plot each feature map
+    for i in range(n_features):
+        feature_map = feature_maps[0, :, :, i]
+        axes[i].imshow(feature_map, cmap='viridis')
+        axes[i].set_title(f'Feature {i+1}')
+        axes[i].axis('off')
+    
+    # Hide unused subplots
+    for i in range(n_features, grid_size*grid_size):
+        axes[i].axis('off')
+    
+    plt.suptitle(f'Feature Maps from layer: {layer_name}')
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.9)
+    
+    return fig, axes

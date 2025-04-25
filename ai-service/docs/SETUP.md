@@ -70,7 +70,7 @@ For this project, we use a reduced dataset configuration with 5 specific categor
 cd ai-service
 
 # Download only 5 categories with 5000 samples each
-python scripts/download_dataset.py --categories apple bicycle cat dog airplane --limit 5000
+python scripts/download_dataset.py --categories apple bicycle cat house airplane --limit 5000
 ```
 
 The downloaded data will be stored in the `data/raw` directory.
@@ -81,7 +81,7 @@ Convert the raw NDJSON data to image format and create training/validation/test 
 
 ```bash
 # Process the 5 categories (make sure you've downloaded them first)
-python scripts/process_dataset.py --categories apple bicycle cat dog airplane --max-samples 5000
+python scripts/process_dataset.py --categories apple bicycle cat house airplane --max-samples 5000
 ```
 
 The processed data will be stored in the `data/processed` directory.
@@ -106,18 +106,49 @@ Note: Make sure to follow these steps in order:
 
 This configuration requires less storage space and significantly speeds up training while still providing sufficient data for testing and development purposes.
 
-## Model Training
+## Model Training with MobileNetV2
 
-### 1. Training Options
+The model training uses a two-phase approach for optimal transfer learning:
 
-Train the model with our reduced dataset:
+### 1. Phase 1: Training the Classification Head
+
+In the first phase, we freeze the base MobileNetV2 model and train only the classification head:
 
 ```bash
-# Train Simple CNN with the reduced dataset
-python scripts/train_model.py --model-type simple --categories apple bicycle cat dog airplane --epochs 10 --batch-size 64
+# Train MobileNetV2 Phase 1 (classification head only)
+python scripts/train_model.py --model-type mobilenet --phase 1 --epochs 10 --batch-size 64 --learning-rate 0.001 --augmentation
 ```
 
-### 2. Interactive Training with Jupyter Notebook
+### 2. Phase 2: Fine-tuning the Model
+
+After training the classification head, fine-tune the top layers of the MobileNetV2 model with a lower learning rate:
+
+```bash
+# Train MobileNetV2 Phase 2 (fine-tuning)
+python scripts/train_model.py --model-type mobilenet --phase 2 --epochs 20 --batch-size 64 --learning-rate 0.0001 --augmentation
+```
+
+### 3. Additional Training Options
+
+Create confusion matrix and classification report:
+```bash
+# Train with confusion matrix generation
+python scripts/train_model.py --model-type mobilenet --phase 1 --confusion-matrix
+```
+
+Convert to TensorFlow Lite for deployment:
+```bash
+# Train and convert to TFLite
+python scripts/train_model.py --model-type mobilenet --phase 2 --convert-tflite --quantize
+```
+
+For quick testing with limited data:
+```bash
+# Train with smaller dataset
+python scripts/train_model.py --model-type mobilenet --phase 1 --max-per-class 500 --batch-size 32
+```
+
+### 4. Interactive Training with Jupyter Notebook
 
 For more control and visualizations during training:
 
@@ -128,13 +159,13 @@ jupyter notebook
 
 Then open `notebooks/model_training.ipynb` in your browser and follow the instructions.
 
-### 3. Model Evaluation
+### 5. Model Evaluation
 
 After training, evaluate your model:
 
 ```bash
 # Test the model on the test set
-python scripts/model_diagnostics.py --model-path app/models/quickdraw/quickdraw_model_simple_*.h5
+python scripts/model_diagnostics.py --model-path app/models/quickdraw/quickdraw_model_mobilenet_*.h5
 ```
 
 ## Running the API Service
@@ -145,7 +176,7 @@ Create a `.env` file in the ai-service directory:
 
 ```bash
 # Create .env file
-echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_simple_*.h5" > .env
+echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_mobilenet_*.h5" > .env
 echo "PORT=5002" >> .env
 echo "DEBUG=True" >> .env
 ```
@@ -202,7 +233,7 @@ For TensorFlow compatibility issues:
 ```bash
 # Reset and reinstall TensorFlow
 pip uninstall -y tensorflow tensorflow-cpu
-pip install tensorflow-cpu==2.10.0 protobuf==3.20.3
+pip install tensorflow-cpu==2.10.0 protobuf==3.19.6
 ```
 
 #### Image Processing Issues

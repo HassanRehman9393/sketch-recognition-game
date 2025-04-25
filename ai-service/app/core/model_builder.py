@@ -24,6 +24,7 @@ class QuickDrawModelBuilder:
         self.input_shape = (28, 28, 1)  # Our normalized images are 28x28 grayscale
         self.model = None
         self.history = None
+        self.learning_rate = 0.001  # Default learning rate
         
     def build_simple_cnn(self, num_classes):
         """
@@ -155,7 +156,7 @@ class QuickDrawModelBuilder:
         Returns:
             tf.keras.Model: MobileNetV2-based model
         """
-        self.logger.info(f"Building MobileNetV2-based model with {num_classes} output classes")
+        logger.info(f"Building MobileNetV2-based model with {num_classes} output classes")
         
         # MobileNetV2 expects 3-channel input, so we need to adapt our grayscale images
         if input_shape[-1] == 1:
@@ -174,6 +175,9 @@ class QuickDrawModelBuilder:
             inputs = tf.keras.layers.Input(shape=input_shape)
             x = tf.keras.layers.Resizing(96, 96)(inputs)
         
+        # Apply MobileNetV2 specific preprocessing (scaling to [-1,1])
+        x = tf.keras.layers.Rescaling(scale=1./127.5, offset=-1)(x)
+        
         # Load pre-trained MobileNetV2 without top layers
         base_model = tf.keras.applications.MobileNetV2(
             input_shape=(96, 96, 3),
@@ -184,7 +188,7 @@ class QuickDrawModelBuilder:
             alpha=1.0
         )
         
-        # Freeze the base model layers
+        # Freeze the base model layers initially
         base_model.trainable = False
         
         # Connect the base model
@@ -210,6 +214,7 @@ class QuickDrawModelBuilder:
         )
         
         model.summary(line_length=100)
+        self.model = model
         return model
     
     def train(self, train_data, validation_data, epochs=20, batch_size=64, callbacks_list=None):

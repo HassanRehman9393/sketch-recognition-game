@@ -313,7 +313,7 @@ sketch-recognition-project/
 
 **Tasks:**
 1. Download and process Quick Draw dataset
-   - Download 5 selected categories (apple, car, cat, house, tree)
+   - Download 5 selected categories (apple, car, airplane, house, bicycle)
    - Limit to 5,000 samples per category
    - Implement data processing pipeline
 
