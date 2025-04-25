@@ -29,6 +29,21 @@ def allowed_file(filename):
     """Check if the file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@recognition_bp.before_app_first_request
+def init_recognition_service():
+    """Initialize the recognition service before the first request"""
+    global recognition_service
+    
+    # Get model path from environment variable or use default
+    model_path = os.environ.get('MODEL_PATH', None)
+    
+    try:
+        recognition_service = SketchRecognitionService(model_path)
+        logger.info(f"Recognition service initialized with classes: {recognition_service.class_names}")
+    except Exception as e:
+        logger.error(f"Error initializing recognition service: {e}")
+        logger.error(traceback.format_exc())
+
 @recognition_bp.route('/recognize', methods=['POST'])
 def recognize_sketch():
     """
@@ -46,156 +61,52 @@ def recognize_sketch():
         start_time = time.time()
         logger.debug(f"New recognition request received: {request.content_type}")
         
-        # Get recognition service instance
-        recognition_service = get_recognition_service()
+        # Check if recognition service is initialized
+        if recognition_service is None:
+            init_recognition_service()
+            if recognition_service is None:
+                return jsonify({
+                    "success": False,
+                    "error": "Recognition service not available"
+                }), 503
         
-        # Check if model is loaded
-        model_info = recognition_service.get_model_info()
-        if model_info['status'] != 'loaded':
-            return jsonify({
-                'success': False,
-                'error': 'Model not loaded, please try again later',
-                'model_status': model_info['status'],
-                'timestamp': time.time()
-            }), 503
-            
-        logger.debug(f"Model is loaded with {model_info.get('num_classes', 0)} classes")
+        # Get image data from request
+        image_data = None
         
-        # Handle file upload case
+        # Case 1: Image file in multipart/form-data
         if 'image' in request.files:
             file = request.files['image']
-            logger.debug(f"Received file upload: {file.filename}")
+            image_data = file.read()
             
-            # Check if file is provided and valid
-            if file.filename == '':
-                logger.warning("Empty filename provided")
-                return jsonify({
-                    'success': False,
-                    'error': 'No file selected',
-                    'timestamp': time.time()
-                }), 400
-                
-            if not allowed_file(file.filename):
-                logger.warning(f"Invalid file extension: {file.filename}")
-                return jsonify({
-                    'success': False,
-                    'error': f'Invalid file format. Allowed formats: {", ".join(ALLOWED_EXTENSIONS)}',
-                    'timestamp': time.time()
-                }), 400
-                
-            try:
-                # Read and process the image
-                img_bytes = file.read()
-                img = Image.open(io.BytesIO(img_bytes))
-                logger.debug(f"Image loaded from file upload: {img.size} {img.mode}")
-                
-                # Save a copy for debugging if needed
-                debug_dir = Path(current_app.config.get('DEBUG_DIR', 'debug_images'))
-                debug_dir.mkdir(exist_ok=True)
-                debug_path = debug_dir / f"debug_upload_{time.time()}.png"
-                img.save(debug_path)
-                logger.debug(f"Debug image saved to {debug_path}")
-                
-                # Run inference
-                result = recognition_service.predict(img)
-                
-            except Exception as e:
-                logger.error(f"Error processing uploaded image: {str(e)}")
-                logger.error(traceback.format_exc())
-                return jsonify({
-                    'success': False,
-                    'error': f"Error processing image: {str(e)}",
-                    'timestamp': time.time()
-                }), 400
-                
-        # Handle JSON data case (image_data or strokes)
-        elif request.is_json:
-            # Get request data
-            sketch_data = request.get_json()
-            logger.debug(f"Received JSON data with keys: {sketch_data.keys()}")
+        # Case 2: Base64 encoded image in JSON
+        elif request.is_json and 'image_data' in request.json:
+            image_data = request.json['image_data']
             
-            # Validate request data
-            if not sketch_data:
-                logger.warning("Empty JSON payload")
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid request: No data provided',
-                    'timestamp': time.time()
-                }), 400
-            
-            # Check required fields (either image_data or strokes should be present)
-            if not ('image_data' in sketch_data or 'strokes' in sketch_data):
-                logger.warning("Missing required fields in JSON payload")
-                return jsonify({
-                    'success': False,
-                    'error': 'Invalid request: Missing required field - must include either image_data or strokes',
-                    'timestamp': time.time()
-                }), 400
-            
-            # Run inference
-            result = recognition_service.predict(sketch_data)
-            
+        # Case 3: Raw image data in request body
+        elif request.data:
+            image_data = request.data
+        
         else:
-            logger.warning(f"Unsupported content type: {request.content_type}")
             return jsonify({
-                'success': False,
-                'error': 'Invalid request: Must provide either multipart/form-data with image file or application/json with sketch data',
-                'timestamp': time.time()
+                "success": False,
+                "error": "No image data provided"
             }), 400
+            
+        # Perform recognition
+        results = recognition_service.recognize_sketch(image_data)
         
         # Add processing time
-        processing_time = time.time() - start_time
-        result['processing_time'] = round(processing_time, 4)
+        results['processing_time_ms'] = round((time.time() - start_time) * 1000, 2)
         
-        # Safety check to ensure we have predictions with proper structure
-        if not result.get('success', False):
-            # Create a valid response with error information
-            logger.warning(f"Prediction failed: {result.get('error', 'unknown error')}")
-            return jsonify({
-                'success': False,
-                'error': result.get('error', 'Unknown prediction error'),
-                'processing_time': round(processing_time, 4),
-                'timestamp': time.time()
-            }), 500
-            
-        # Ensure the predictions structure is valid
-        if 'predictions' not in result or 'top_predictions' not in result['predictions']:
-            # Fix the response structure
-            logger.warning("Missing predictions in result, using fallback")
-            result['predictions'] = {
-                'top_predictions': [{"class": "unknown", "confidence": 1.0}],
-                'inference_time': result.get('predictions', {}).get('inference_time', 0.01)
-            }
-            
-        # Ensure top_predictions is not empty
-        if not result['predictions']['top_predictions']:
-            logger.warning("Empty top_predictions list, using fallback")
-            result['predictions']['top_predictions'] = [{"class": "unknown", "confidence": 1.0}]
-        
-        # Log successful recognition
-        try:
-            top_class = result['predictions']['top_predictions'][0]['class']
-            confidence = result['predictions']['top_predictions'][0]['confidence']
-            logger.info(f"Successfully recognized sketch as '{top_class}' with {confidence:.2f} confidence in {processing_time:.4f}s")
-        except (KeyError, IndexError):
-            # Handle any unexpected structure issues
-            logger.warning("Recognition succeeded but with unexpected result format")
-        
-        return jsonify(result)
+        return jsonify(results)
         
     except Exception as e:
-        logger.error(f"Error in recognition endpoint: {str(e)}")
+        logger.error(f"Error in recognize_sketch endpoint: {e}")
         logger.error(traceback.format_exc())
-        
-        # Ensure we return a valid response even on exceptions
         return jsonify({
-            'success': False,
-            'error': f"Recognition failed: {str(e)}",
-            'predictions': {
-                'top_predictions': [{"class": "error", "confidence": 1.0}],
-                'inference_time': 0
-            },
-            'timestamp': time.time()
+            "success": False,
+            "error": str(e),
+            "predictions": []
         }), 500
 
 @recognition_bp.route('/recognize/debug', methods=['POST'])

@@ -176,7 +176,7 @@ Create a `.env` file in the ai-service directory:
 
 ```bash
 # Create .env file
-echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_mobilenet_*.h5" > .env
+echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_mobilenet_phase2_*.h5" > .env
 echo "PORT=5002" >> .env
 echo "DEBUG=True" >> .env
 ```
@@ -185,10 +185,97 @@ echo "DEBUG=True" >> .env
 
 ```bash
 # Start with default settings
-python scripts/main.py
+python main.py
 ```
 
 By default, the service runs on `http://localhost:5002`.
+
+## Testing the Inference Pipeline
+
+After training the model and setting up the API service, you can test the inference pipeline using the following methods:
+
+### 1. Using the Test Script
+
+```bash
+# Test with a specific image file
+python scripts/test_inference.py --image test_images/apple.png
+```
+
+### 2. Using the Test Recognition Script
+
+```bash
+# Create sample test shapes
+python tests/test_recognition.py --create-samples
+
+# Test with a specific image
+python tests/test_recognition.py --image test_images/apple.png
+
+# Test with all generated shapes
+python tests/test_recognition.py --compare-all
+```
+
+### 3. Direct Testing of the API
+
+```bash
+# Using curl
+curl -F "image=@test_images/apple.png" http://localhost:5002/api/recognize
+
+# Using Python
+python -c "import requests; response = requests.post('http://localhost:5002/api/recognize', files={'image': open('test_images/apple.png', 'rb')}); print(response.json())"
+```
+
+### 4. Testing with Base64 Encoded Images
+
+The API also supports base64-encoded image data, which is useful when sending images from web applications:
+
+```bash
+# Example POST request with base64 image
+python -c """
+import requests
+import base64
+with open('test_images/apple.png', 'rb') as f:
+    img_data = base64.b64encode(f.read()).decode('utf-8')
+response = requests.post(
+    'http://localhost:5002/api/recognize',
+    json={'image_data': f'data:image/png;base64,{img_data}'}
+)
+print(response.json())
+"""
+```
+
+### 5. Test the MobileNet Model Performance
+
+```bash
+# Test the MobileNet model on specific images
+python tests/test_mobilenet_model.py --image test_images/apple.png --visualize
+```
+
+## Integrating with Frontend Applications
+
+The sketch recognition API can be easily integrated with frontend applications. Here's an example of how to send canvas data from a web application:
+
+```javascript
+// Example JavaScript code for sending canvas data to the API
+const canvas = document.getElementById('drawing-canvas');
+const dataURL = canvas.toDataURL('image/png');
+
+// Send to API
+fetch('http://localhost:5002/api/recognize', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ image_data: dataURL }),
+})
+.then(response => response.json())
+.then(data => {
+  console.log('Recognition results:', data.predictions);
+  // Update UI with recognition results
+})
+.catch(error => console.error('Error:', error));
+```
+
+This integration allows real-time sketch recognition as users draw on the canvas, providing an interactive experience.
 
 ## Testing the API
 

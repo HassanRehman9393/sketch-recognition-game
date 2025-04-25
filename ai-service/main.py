@@ -7,6 +7,12 @@ import argparse
 import logging
 import sys
 from dotenv import load_dotenv
+from flask import Flask, jsonify
+from flask_cors import CORS
+from pathlib import Path
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 # Configure logging - adjust level based on environment
 logging.basicConfig(
@@ -21,6 +27,29 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=all, 1=info, 2=warning, 3=error
 import warnings
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
+
+logger = logging.getLogger('ai_service')
+
+def create_app():
+    """Create and configure the Flask application"""
+    app = Flask(__name__)
+    
+    # Enable CORS
+    CORS(app)
+    
+    # Import and register blueprints
+    from app.routes.recognition_routes import recognition_bp
+    app.register_blueprint(recognition_bp, url_prefix='/api')
+    
+    # Root endpoint for health check
+    @app.route('/', methods=['GET'])
+    def health_check():
+        return jsonify({
+            "status": "ok",
+            "service": "sketch-recognition-ai-service"
+        })
+        
+    return app
 
 def main():
     """Main entry point for the AI service"""
@@ -43,11 +72,7 @@ def main():
         # Suppress Flask development server logs
         logging.getLogger('werkzeug').setLevel(logging.ERROR)
     
-    # Import app factory
-    logger = logging.getLogger('ai_service')
-    
     try:
-        from app import create_app
         app = create_app()
         
         # Print available routes
