@@ -55,6 +55,10 @@ progress_bar = tqdm if TQDM_AVAILABLE else SimpleTqdm
 from .data_loader import QuickDrawDataLoader, CATEGORIES
 from ..utils.image_utils import strokes_to_image, normalize_sketch
 
+# Default categories for reduced dataset configuration
+DEFAULT_CATEGORIES = ['apple', 'bicycle', 'cat', 'dog', 'airplane']
+DEFAULT_SAMPLES_PER_CATEGORY = 5000
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -130,6 +134,8 @@ class QuickDrawDataProcessor:
                 
         if not category_file:
             logger.error(f"Category file for '{category}' not found")
+            logger.error(f"Looking in directory: {self.raw_data_dir}")
+            logger.error(f"Available files: {list(self.raw_data_dir.glob('*.ndjson'))}")
             return {'status': 'error', 'message': 'Category file not found'}
         
         logger.info(f"Processing category: {category} from {category_file.name}")
@@ -156,35 +162,123 @@ class QuickDrawDataProcessor:
                     
                 try:
                     # Parse the JSON line
-                    drawing_data = json.loads(line)
+                    drawing_data = json.loads(line.strip())
                     
-                    # Extract stroke data
-                    stroke_data = self._extract_strokes(drawing_data)
+                    # Extract raw strokes from the drawing data
+                    raw_strokes = []
+                    if 'drawing' in drawing_data:
+                        for stroke in drawing_data['drawing']:
+                            if len(stroke) >= 2:
+                                x_points = stroke[0]
+                                y_points = stroke[1]
+                                if x_points and y_points and len(x_points) == len(y_points):
+                                    raw_strokes.append((x_points, y_points))
                     
-                    if stroke_data:
+                    if raw_strokes:
                         # Generate a unique ID for the drawing
                         drawing_id = drawing_data.get('key_id', f"{category}_{i}")
                         
-                        # Convert strokes to image (original size)
-                        stroke_img = strokes_to_image(stroke_data, image_size=(256, 256))
+                        # Calculate min/max coordinates across all strokes to maintain aspect ratio
+                        all_x = []
+                        all_y = []
+                        for x_points, y_points in raw_strokes:
+                            all_x.extend(x_points)
+                            all_y.extend(y_points)
+                        
+                        min_x, max_x = min(all_x), max(all_x)
+                        min_y, max_y = min(all_y), max(all_y)
+                        
+                        # Add padding (2px) by adjusting the coordinate range
+                        padding = 2
+                        canvas_size = 28 - 2 * padding  # Effective drawing area
+                        
+                        # Calculate scaling factors while maintaining aspect ratio
+                        x_range = max_x - min_x
+                        y_range = max_y - min_y
+                        
+                        # Handle case where drawing is just a point
+                        if x_range == 0:
+                            x_range = 1
+                        if y_range == 0:
+                            y_range = 1
+                        
+                        # Calculate scale to fit the drawing within the canvas while preserving aspect ratio
+                        scale = min(canvas_size / x_range, canvas_size / y_range)
+                        
+                        # Create both original size image (256x256) and normalized image (28x28)
+                        orig_img = np.ones((256, 256), dtype=np.uint8) * 255
+                        norm_img = np.ones((28, 28), dtype=np.uint8) * 255
+                        
+                        # Draw strokes on both images
+                        for x_points, y_points in raw_strokes:
+                            # For original size image (256x256)
+                            orig_points = []
+                            for x, y in zip(x_points, y_points):
+                                px = int((x / 255.0) * 255)
+                                py = int((y / 255.0) * 255)
+                                orig_points.append((px, py))
+                            
+                            # Draw original size
+                            for j in range(len(orig_points) - 1):
+                                pt1, pt2 = orig_points[j], orig_points[j + 1]
+                                cv2.line(orig_img, pt1, pt2, 0, thickness=2, lineType=cv2.LINE_AA)
+                            
+                            # For normalized image (28x28)
+                            norm_points = []
+                            for x, y in zip(x_points, y_points):
+                                # Apply aspect ratio preserving transformation with padding
+                                px = int(((x - min_x) * scale) + padding)
+                                py = int(((y - min_y) * scale) + padding)
+                                # Ensure coordinates are within bounds
+                                px = max(0, min(px, 27))
+                                py = max(0, min(py, 27))
+                                norm_points.append((px, py))
+                            
+                            # Draw with anti-aliasing
+                            for j in range(len(norm_points) - 1):
+                                pt1, pt2 = norm_points[j], norm_points[j + 1]
+                                cv2.line(norm_img, pt1, pt2, 0, thickness=1, lineType=cv2.LINE_AA)
+                        
+                        # Verify that the normalized image has sufficient non-white pixels (at least 5)
+                        non_white_pixels = np.sum(norm_img < 255)
+                        if non_white_pixels < 5:
+                            # Try alternative normalization
+                            norm_img = np.ones((28, 28), dtype=np.uint8) * 255
+                            
+                            # Use min-max scaling with extra emphasis
+                            for x_points, y_points in raw_strokes:
+                                norm_points = []
+                                for x, y in zip(x_points, y_points):
+                                    # Apply tighter scaling to ensure visibility
+                                    px = int(((x - min_x) * (24 / x_range)) + 2)
+                                    py = int(((y - min_y) * (24 / y_range)) + 2)
+                                    # Ensure coordinates are within bounds
+                                    px = max(0, min(px, 27))
+                                    py = max(0, min(py, 27))
+                                    norm_points.append((px, py))
+                                
+                                # Draw with slightly thicker lines
+                                for j in range(len(norm_points) - 1):
+                                    pt1, pt2 = norm_points[j], norm_points[j + 1]
+                                    cv2.line(norm_img, pt1, pt2, 0, thickness=1, lineType=cv2.LINE_AA)
+                            
+                            # Check again
+                            non_white_pixels = np.sum(norm_img < 255)
+                            if non_white_pixels < 5:
+                                logger.warning(f"Drawing {drawing_id} still has insufficient non-white pixels: {non_white_pixels}")
                         
                         # Save the original size image
                         orig_path = category_dir / f"{drawing_id}_orig.png"
-                        cv2.imwrite(str(orig_path), cv2.cvtColor(stroke_img, cv2.COLOR_RGB2BGR))
+                        cv2.imwrite(str(orig_path), orig_img)
                         
-                        # Create and save the normalized version for training (28x28)
-                        norm_img = normalize_sketch(stroke_img)
-                        # Resize to exactly 28x28 for model training
-                        norm_img = cv2.resize(norm_img, (28, 28))
-                        
-                        # Save as PNG (scale back to 0-255 range)
+                        # Save the normalized image
                         norm_path = category_dir / f"{drawing_id}_norm.png"
-                        cv2.imwrite(str(norm_path), norm_img * 255)
+                        cv2.imwrite(str(norm_path), norm_img)
                         
                         # Save stroke data as JSON for potential future use
                         with open(category_dir / f"{drawing_id}_strokes.json", 'w') as sf:
-                            json.dump({'strokes': stroke_data}, sf)
-                            
+                            json.dump({'strokes': raw_strokes}, sf)
+                        
                         processed_count += 1
                     else:
                         invalid_count += 1
@@ -464,13 +558,14 @@ class QuickDrawDataProcessor:
         except Exception as e:
             logger.error(f"Error creating dataset distribution visualization: {str(e)}")
     
-    def process_all_categories(self, max_samples_per_category=None, visualize=True):
+    def process_all_categories(self, max_samples_per_category=None, visualize=True, selected_categories=None):
         """
         Process all available categories
         
         Args:
             max_samples_per_category (int, optional): Maximum samples per category
             visualize (bool): Whether to visualize examples
+            selected_categories (list, optional): List of specific categories to process
             
         Returns:
             dict: Processing statistics
@@ -485,10 +580,19 @@ class QuickDrawDataProcessor:
             logger.error("No categories available for processing")
             return {'status': 'error', 'message': 'No categories available'}
         
-        logger.info(f"Processing {len(available_categories)} categories")
+        # Use selected categories if specified, otherwise use all available
+        if selected_categories:
+            categories_to_process = [c for c in selected_categories if c in available_categories]
+            if not categories_to_process:
+                logger.error(f"None of the selected categories {selected_categories} are available")
+                return {'status': 'error', 'message': 'Selected categories not available'}
+        else:
+            categories_to_process = available_categories
+        
+        logger.info(f"Processing {len(categories_to_process)} categories: {categories_to_process}")
         
         # Process each category
-        for category in available_categories:
+        for category in categories_to_process:
             self.process_category(category, max_samples_per_category, visualize)
         
         # Split the dataset
@@ -509,6 +613,30 @@ class QuickDrawDataProcessor:
             'processing_time': processing_time
         }
 
+    def process_reduced_dataset(self, categories=DEFAULT_CATEGORIES, 
+                              samples_per_category=DEFAULT_SAMPLES_PER_CATEGORY, 
+                              visualize=True):
+        """
+        Process a reduced dataset with specific categories and sample limits
+        
+        Args:
+            categories (list): List of categories to process (default: 5 common categories)
+            samples_per_category (int): Maximum samples per category (default: 5000)
+            visualize (bool): Whether to visualize examples
+            
+        Returns:
+            dict: Processing statistics
+        """
+        logger.info(f"Processing reduced dataset with {len(categories)} categories "
+                   f"and {samples_per_category} samples per category")
+        logger.info(f"Selected categories: {categories}")
+        
+        return self.process_all_categories(
+            max_samples_per_category=samples_per_category,
+            visualize=visualize,
+            selected_categories=categories
+        )
+
 # For direct execution of this module
 if __name__ == "__main__":
     # Define base paths
@@ -523,8 +651,23 @@ if __name__ == "__main__":
     # Create processor
     processor = QuickDrawDataProcessor(raw_dir, processed_dir)
     
-    # Process all available categories with a limit per category
-    result = processor.process_all_categories(max_samples_per_category=1000)
+    # Process reduced dataset (5 categories, 5000 images each)
+    import argparse
+    parser = argparse.ArgumentParser(description='Process Quick Draw dataset')
+    parser.add_argument('--reduced', action='store_true', help='Process reduced dataset (5 categories)')
+    parser.add_argument('--all', action='store_true', help='Process all available categories')
+    parser.add_argument('--limit', type=int, default=None, help='Limit samples per category')
+    args = parser.parse_args()
+    
+    if args.reduced:
+        # Use reduced dataset configuration
+        result = processor.process_reduced_dataset(samples_per_category=args.limit or DEFAULT_SAMPLES_PER_CATEGORY)
+    elif args.all:
+        # Process all available categories
+        result = processor.process_all_categories(max_samples_per_category=args.limit)
+    else:
+        # Default to reduced dataset
+        result = processor.process_reduced_dataset()
     
     print("\nProcessing Results:")
     print(f"Status: {result['status']}")

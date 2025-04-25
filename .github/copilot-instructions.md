@@ -135,26 +135,27 @@ sketch-recognition-project/
 ## Raw Quick Draw Dataset Integration
 
 ### Dataset Information
-- The raw Quick Draw dataset contains over 50 million drawings across 345 categories
-- We'll focus on 10-15 common categories (e.g., apple, cat, house, car, tree, etc.)
+- Using 5 categories from the Quick Draw dataset: 'apple', 'airplane', 'cat', 'bicycle', 'dog'
+- 5,000 images per category (25,000 total training samples)
 - Each drawing consists of stroke data representing timestamped X,Y coordinates
 
 ### Dataset Processing Steps
 1. **Download Raw Data**:
-   - Access raw `.ndjson` files from Google Cloud Storage
+   - Access raw `.ndjson` files from Google Cloud Storage for 5 selected categories
    - Each category is stored in a separate file (~250MB per category)
-   - Download only the 10-15 selected categories
+   - Create a script to select and download only 5,000 samples from each category
+   - DO NOT store dataset files in the git repository
 
 2. **Data Processing**:
    - Parse stroke data from `.ndjson` files
    - Convert strokes to images for training
-   - Normalize and preprocess images
-   - Split into training/validation/test sets
+   - Normalize and preprocess images to 96x96 (MobileNetV2 input size)
+   - Split into training (80%), validation (10%), and test (10%) sets
+   - Apply data augmentation techniques
 
-3. **Model Training**:
-   - Train a convolutional neural network (CNN) on processed images
-   - Fine-tune hyperparameters
-   - Evaluate on validation set
+3. **Model Training with MobileNetV2**:
+   - Implement transfer learning with MobileNetV2 pre-trained model
+   - Fine-tune top layers for sketch recognition
    - Save trained model for inference
 
 4. **Inference Pipeline**:
@@ -162,13 +163,108 @@ sketch-recognition-project/
    - Run inference through trained model
    - Return top predictions with confidence scores
 
+## MobileNetV2 Implementation Guide for Sketch Recognition
+
+### Key Considerations for MobileNetV2
+
+1. **Model Architecture**
+   - MobileNetV2 uses inverted residuals and linear bottlenecks
+   - Depth-wise separable convolutions reduce computational cost
+   - Use pre-trained ImageNet weights as starting point
+   - Default input size is 224x224, but can be adjusted to 96x96 for faster processing
+
+2. **Transfer Learning Strategy**
+   - Freeze the base model layers initially
+   - Only train the custom classification head during initial epochs
+   - Gradually unfreeze deeper layers for fine-tuning
+   - Use lower learning rates for fine-tuning (0.0001 or lower)
+
+3. **Input Preprocessing Requirements**
+   - Convert grayscale sketch images to 3-channel format
+   - Resize images to 96x96 pixels (balance between detail and computation)
+   - Normalize pixel values to [0,1] range
+   - Apply MobileNetV2 specific preprocessing (scaling to [-1,1])
+
+4. **Data Augmentation for Sketches**
+   - Rotation: ±10 degrees to simulate hand drawing variations
+   - Width/height shifts: ±10% to handle positioning differences
+   - Zoom: ±10% to handle size variations
+   - Horizontal flips for applicable categories only
+   - Avoid augmentations that could change object identity
+
+5. **Training Optimization Techniques**
+   - Batch size: 64-128 (depending on available memory)
+   - Initial learning rate: 0.001 with Adam optimizer
+   - Learning rate scheduling: Reduce on plateau
+   - Early stopping: Monitor validation accuracy with patience of 10 epochs
+   - Implement gradient clipping to prevent exploding gradients
+
+6. **Model Performance Improvement**
+   - Batch normalization after dense layers
+   - Dropout (0.5) for regularization
+   - Mixed precision training for faster processing
+   - Progressive resizing (start with smaller images, then increase)
+   - Class weighting for imbalanced categories
+
+7. **Evaluation Metrics to Track**
+   - Top-1 and Top-3 accuracy
+   - Confusion matrix to identify problematic categories
+   - Precision, recall, and F1-score
+   - Inference time on target devices
+
+8. **Deployment Optimization**
+   - Model quantization to reduce size
+   - TensorFlow Lite conversion for mobile deployment
+   - ONNX format for cross-platform support
+   - API design for efficient inference
+
+### Implementation Workflow for MobileNetV2
+
+1. **Environment Setup**
+   - Install TensorFlow 2.x
+   - Configure GPU acceleration if available
+   - Set up appropriate Python environment
+
+2. **Dataset Preparation**
+   - Download raw Quick Draw data for 5 categories
+   - Convert strokes to images
+   - Implement data splitting and augmentation pipeline
+
+3. **Model Architecture Setup**
+   - Import MobileNetV2 with pre-trained weights
+   - Remove top classification layer
+   - Add custom classification head for 5 categories
+   - Freeze base model layers
+
+4. **Training Implementation**
+   - Train in two phases:
+     a. Train only the classification head (5-10 epochs)
+     b. Fine-tune top layers of base model (20-30 epochs)
+   - Monitor validation accuracy throughout training
+   - Save model checkpoints for best performance
+
+5. **Evaluation and Testing**
+   - Test on held-out validation set
+   - Create confusion matrix visualization
+   - Calculate precision/recall for each category
+
+6. **Optimization for Deployment**
+   - Quantize model to reduce size
+   - Benchmark inference speed
+   - Create prediction endpoints for API
+
+7. **API Integration**
+   - Design Flask API for sketch recognition
+   - Implement preprocessing for incoming data
+   - Return confidence scores for top predictions
+
 ## Detailed Implementation Plan
 
 ### Days 1-3: Project Setup & Initial Configuration
 
 **Tasks:**
 1. Set up project repositories and structure
-   - Create GitHub repository
+   - Create GitHub repository with `.gitignore` configured to exclude dataset files
    - Initialize basic project structure for frontend, backend, and AI service
 
 2. Set up frontend environment
@@ -192,45 +288,46 @@ sketch-recognition-project/
 ### Days 4-7: Canvas Implementation & Socket Integration
 
 **Tasks:**
-1. Set up authentication system
-   - Implement JWT authentication on backend
-   - Create login/register API endpoints
-   - Set up protected routes
-
-2. Create basic user interface
-   - Implement navigation and layout
-   - Design and implement login/register forms
-   - Create user presence indicators
-
-3. Create Canvas component
+1. Create Canvas component
    - Implement drawing functionality
    - Add color picker and brush size controls
    - Implement undo/redo functionality
 
-4. Set up real-time communication
+2. Set up real-time communication
    - Configure Socket.io on backend
    - Implement drawing event broadcasting
    - Set up room-based connections
    - Test multi-user interaction
-### Days 8-12: Raw Dataset Processing & Model Training
+
+3. Create basic user interface
+   - Implement navigation and layout
+   - Design and implement login/register forms
+   - Create user presence indicators
+
+4. Set up authentication system
+   - Implement JWT authentication on backend
+   - Create login/register API endpoints
+   - Set up protected routes
+
+### Days 8-12: Dataset Processing & MobileNetV2 Model Training
 
 **Tasks:**
-1. Download raw Quick Draw dataset
-   - Set up script to download selected 10-15 categories
-   - Implement storage and management of raw data
-   - Create data backup strategy
+1. Download and process Quick Draw dataset
+   - Download 5 selected categories (apple, car, cat, house, tree)
+   - Limit to 5,000 samples per category
+   - Implement data processing pipeline
 
-2. Process raw dataset
-   - Parse `.ndjson` files to extract stroke data
-   - Convert strokes to normalized images
-   - Create data visualization for verification
-   - Split into training/validation/test sets
-
-3. Train sketch recognition model
-   - Implement CNN architecture suitable for sketch recognition
-   - Set up training pipeline with TensorFlow
+2. Implement MobileNetV2 model with transfer learning
+   - Set up MobileNetV2 architecture
+   - Configure data augmentation pipeline
+   - Implement training script with optimal parameters
    - Train model on processed dataset
-   - Validate and optimize model performance
+
+3. Evaluate and optimize model
+   - Test model on validation set
+   - Fine-tune hyperparameters
+   - Implement early stopping and learning rate scheduling
+   - Create confusion matrix for error analysis
 
 4. Create inference pipeline
    - Implement function to convert canvas data to model input format
@@ -311,34 +408,6 @@ sketch-recognition-project/
    - End-to-end testing of deployed application
    - Fix any last-minute issues
    - Prepare demonstration
-
-## Raw Dataset Processing Details
-
-### Downloading Raw Data
-```
-# Selected categories (10-15 common objects)
-CATEGORIES = [
-    'apple', 'bicycle', 'car', 'cat', 'chair',
-    'dog', 'face', 'fish', 'house', 'tree',
-    'umbrella', 'airplane', 'clock', 'star'
-]
-
-# Base URL for Quick Draw raw data
-BASE_URL = "https://storage.googleapis.com/quickdraw_dataset/full/raw/"
-```
-
-### Data Processing Flow
-1. **Extract Strokes**: Parse JSON to extract X,Y coordinate sequences
-2. **Normalize Coordinates**: Scale all drawings to same dimensions
-3. **Rasterize Strokes**: Convert vector strokes to raster images
-4. **Augment Data**: Apply transformations for robustness
-5. **Create Batches**: Prepare data batches for efficient training
-
-### Model Architecture
-- CNN-based architecture optimized for sketch recognition
-- Input: 28x28 grayscale images (standardized from strokes)
-- Output: Probabilities across 10-15 categories
-- Evaluation metrics: Accuracy, precision, recall, F1-score
 
 ## Python-Node.js Integration Details
 

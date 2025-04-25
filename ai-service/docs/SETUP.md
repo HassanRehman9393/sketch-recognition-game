@@ -38,8 +38,14 @@ pip install -r requirements.txt
 If you encounter TensorFlow compatibility issues:
 
 ```bash
-# Fix for common incompatibility issues
-pip install flask==2.0.3 werkzeug==2.0.3 tensorflow-cpu==2.10.0 protobuf==3.20.3
+# Fix for common dependency conflicts (TensorFlow and protobuf)
+# Option 1: Install compatible versions separately
+pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel protobuf
+pip install tensorflow-cpu==2.10.0 
+pip install protobuf==3.19.6  # This version is compatible with TensorFlow 2.10.0
+
+# Option 2: Install specific compatible versions in one command
+pip install flask==2.0.3 werkzeug==2.0.3 tensorflow-cpu==2.10.0 protobuf==3.19.6
 ```
 
 For OpenCV installation issues:
@@ -55,62 +61,60 @@ pip install opencv-python
 
 ## Dataset Setup
 
-### 1. Download the Quick Draw Dataset
+For this project, we use a reduced dataset configuration with 5 specific categories and 5000 images per category for faster development and testing:
+
+### 1. Download the Reduced Dataset
 
 ```bash
-# List available categories
-python download_dataset.py --list
+# Make sure you're in the root ai-service directory
+cd ai-service
 
-# Download specific categories (recommended)
-python download_dataset.py --categories apple bicycle car cat chair dog face fish house star tree umbrella airplane clock
-
-# Download all default categories at once (14 categories)
-python download_dataset.py --all
-
-# Download with a limit of samples per category (for testing)
-python download_dataset.py --categories apple car dog --limit 1000
+# Download only 5 categories with 5000 samples each
+python scripts/download_dataset.py --categories apple bicycle cat dog airplane --limit 5000
 ```
+
+The downloaded data will be stored in the `data/raw` directory.
 
 ### 2. Process the Dataset
 
 Convert the raw NDJSON data to image format and create training/validation/test splits:
 
 ```bash
-# Process specific categories
-python process_dataset.py --categories apple bicycle car cat chair dog
-
-# Process all downloaded categories
-python process_dataset.py --all
-
-# Process with visualization (to verify conversion)
-python process_dataset.py --all --visualize
-
-# Process with sample limit (for testing)
-python process_dataset.py --all --limit 1000
+# Process the 5 categories (make sure you've downloaded them first)
+python scripts/process_dataset.py --categories apple bicycle cat dog airplane --max-samples 5000
 ```
+
+The processed data will be stored in the `data/processed` directory.
+
+### 3. Verifying Processed Images
+
+After processing, check that the generated images look correct:
+
+```bash
+# Quick command to view a sample processed image (requires display capability)
+python -c "import cv2; import matplotlib.pyplot as plt; img = cv2.imread('data/processed/images/apple/apple_0_norm.png'); plt.imshow(img); plt.show()"
+```
+
+You should see recognizable sketch outlines in the processed images. If the images appear blank or all white, there may be an issue with the processing pipeline.
+
+### 4. Workflow Order
+
+Note: Make sure to follow these steps in order:
+1. First download the dataset using `download_dataset.py`
+2. Then process the dataset with `process_dataset.py`
+3. Finally train the model with `train_model.py`
+
+This configuration requires less storage space and significantly speeds up training while still providing sufficient data for testing and development purposes.
 
 ## Model Training
 
 ### 1. Training Options
 
-You can train different model architectures based on your requirements:
+Train the model with our reduced dataset:
 
 ```bash
-# Train Simple CNN (fastest, ~6 minutes)
-python train_model.py --model-type simple --epochs 10 --batch-size 64
-
-# Train Advanced CNN (better accuracy, ~1 hour)
-python train_model.py --model-type advanced --epochs 20 --batch-size 32
-
-# Train MobileNetV2 (best accuracy, ~2 hours)
-python train_model.py --model-type mobilenet --epochs 20 --batch-size 32 --learning-rate 0.0005 --augmentation
-```
-
-For quick testing with limited data:
-
-```bash
-# Train with smaller dataset
-python train_model.py --model-type simple --epochs 5 --max-per-class 500 --batch-size 32
+# Train Simple CNN with the reduced dataset
+python scripts/train_model.py --model-type simple --categories apple bicycle cat dog airplane --epochs 10 --batch-size 64
 ```
 
 ### 2. Interactive Training with Jupyter Notebook
@@ -130,7 +134,7 @@ After training, evaluate your model:
 
 ```bash
 # Test the model on the test set
-python model_diagnostics.py --model-path app/models/quickdraw/quickdraw_model_mobilenet_*.h5
+python scripts/model_diagnostics.py --model-path app/models/quickdraw/quickdraw_model_simple_*.h5
 ```
 
 ## Running the API Service
@@ -141,7 +145,7 @@ Create a `.env` file in the ai-service directory:
 
 ```bash
 # Create .env file
-echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_mobilenet_20250424_100007.h5" > .env
+echo "MODEL_PATH=app/models/quickdraw/quickdraw_model_simple_*.h5" > .env
 echo "PORT=5002" >> .env
 echo "DEBUG=True" >> .env
 ```
@@ -150,13 +154,7 @@ echo "DEBUG=True" >> .env
 
 ```bash
 # Start with default settings
-python main.py
-
-# Start with specific model
-python main.py --model app/models/quickdraw/quickdraw_model_mobilenet_20250424_100007.h5
-
-# Start with debugging enabled
-python main.py --debug
+python scripts/main.py
 ```
 
 By default, the service runs on `http://localhost:5002`.
@@ -167,41 +165,17 @@ By default, the service runs on `http://localhost:5002`.
 
 ```bash
 # Save sample test images
-python save_test_image.py
+python scripts/save_test_image.py
 ```
 
 ### 2. Using the Test Script
 
 ```bash
-# Test with stroke data
-python test_api.py
-
 # Test with image file
-python test_api.py --image test_images/apple.png
-
-# Test with your own image
-python test_api.py --image path/to/your/image.png
+python scripts/test_api.py --image test_images/apple.png
 ```
 
 ### 3. Testing API Endpoints Directly
-
-#### Using PowerShell:
-
-```powershell
-# Test the API using PowerShell
-Invoke-RestMethod -Uri "http://localhost:5002/api/recognize" -Method Post -Form @{
-    image = Get-Item -Path "test_images/apple.png"
-}
-```
-
-#### Using curl:
-
-```bash
-# Using curl
-curl -F "image=@test_images/apple.png" http://localhost:5002/api/recognize
-```
-
-#### Using Python:
 
 ```python
 import requests
@@ -213,22 +187,6 @@ print(response.json())
 ## Troubleshooting
 
 ### Common Issues
-
-#### Model Loading Issues
-
-If you see errors like "Exception encountered when calling Lambda.call()":
-
-```bash
-# Try using the model fix script
-python fix_mobilenet_model.py --model app/models/quickdraw/your_model.h5
-```
-
-#### Connection Errors
-
-If you receive "Connection refused" errors:
-1. Verify the Flask service is running
-2. Check the port number (default is 5002)
-3. Ensure no firewall is blocking connections
 
 #### Memory Errors
 
@@ -254,47 +212,4 @@ If you encounter OpenCV or image processing errors:
 ```bash
 # Verify basic image operations work
 python -c "from PIL import Image; img = Image.new('RGB', (28, 28), color='white'); img.save('test.png')"
-
-# Check if OpenCV works
-python -c "import cv2; import numpy as np; img = np.zeros((28,28,3), np.uint8); cv2.imwrite('test_cv.png', img)"
-```
-
-## Deployment Considerations
-
-For deploying to production:
-
-1. Use TensorFlow Lite for more efficient inference:
-
-```bash
-# Convert your model to TensorFlow Lite
-python -c "
-from app.utils.model_utils import convert_model_to_tflite
-import tensorflow as tf
-
-# Load model
-model = tf.keras.models.load_model('app/models/quickdraw/your_model.h5')
-
-# Convert to TFLite
-convert_model_to_tflite(model, 'app/models/quickdraw/model.tflite', quantize=True)
-"
-```
-
-2. Set up proper logging for production:
-
-```bash
-# Disable debug mode in .env
-echo "DEBUG=False" > .env
-
-# Start with production settings
-python main.py --log-level warning
-```
-
-3. Consider using Gunicorn for production deployment:
-
-```bash
-# Install gunicorn
-pip install gunicorn
-
-# Run with gunicorn (for Linux/macOS)
-gunicorn -w 4 -b 0.0.0.0:5002 "app:create_app()"
 ```

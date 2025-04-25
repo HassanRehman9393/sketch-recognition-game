@@ -301,7 +301,10 @@ class QuickDrawDataLoader:
         categories = []
         for file in self.raw_data_dir.glob("*.ndjson"):
             if self._is_file_valid(file):
-                categories.append(file.stem)
+                # Extract base category name from filenames like "category_5000.ndjson"
+                category_name = file.stem.split('_')[0]
+                if category_name not in categories:
+                    categories.append(category_name)
         return categories
     
     def get_dataset_info(self):

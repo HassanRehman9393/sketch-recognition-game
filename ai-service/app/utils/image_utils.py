@@ -116,60 +116,48 @@ def normalize_sketch(image, target_size=(28, 28), padding=2):
     
     return normalized
 
-def strokes_to_image(strokes, image_size=(256, 256), line_width=2, bg_color=(255, 255, 255), line_color=(0, 0, 0)):
+def strokes_to_image(strokes, image_size=(256, 256), line_thickness=2, background_color=(255, 255, 255)):
     """
-    Convert stroke data from Quick Draw dataset to an image
+    Convert stroke data to image
     
     Args:
         strokes (list): List of strokes, each containing x,y coordinates
-        image_size (tuple): Size of the output image (width, height)
-        line_width (int): Width of the drawing lines
-        bg_color (tuple): Background color as RGB
-        line_color (tuple): Line color as RGB
+        image_size (tuple): Size of output image (width, height)
+        line_thickness (int): Thickness of lines
+        background_color (tuple): Background color (R,G,B)
         
     Returns:
-        numpy.ndarray: Image as numpy array
+        numpy.ndarray: Image representation of strokes
     """
-    # Create blank image with background color
-    image = np.ones((image_size[1], image_size[0], 3), dtype=np.uint8)
-    image[:] = bg_color
-    
-    # Extract stroke data and normalize coordinates
-    for stroke in strokes:
-        # Extract x, y coordinates
-        points = np.array(list(zip(stroke[0], stroke[1])))
+    try:
+        width, height = image_size
+        img = np.ones((height, width, 3), dtype=np.uint8)
+        img[:, :] = background_color
         
-        if len(points) == 0:
-            continue
+        if not strokes:
+            return img
         
-        # Scale coordinates to fit the image (assumes original coords are in [0,255] range)
-        points = points.astype(np.float32)
-        x_min, y_min = points.min(axis=0)
-        x_max, y_max = points.max(axis=0)
+        for x_coords, y_coords in strokes:
+            # Draw line segments connecting consecutive points
+            for i in range(len(x_coords) - 1):
+                x1, y1 = int(x_coords[i]), int(y_coords[i])
+                x2, y2 = int(x_coords[i + 1]), int(y_coords[i + 1])
+                
+                # Scale to image size
+                x1 = int((x1 / 255.0) * width)
+                y1 = int((y1 / 255.0) * height)
+                x2 = int((x2 / 255.0) * width)
+                y2 = int((y2 / 255.0) * height)
+                
+                # Draw line
+                cv2.line(img, (x1, y1), (x2, y2), (0, 0, 0), line_thickness)
         
-        # Avoid division by zero
-        x_range = max(1.0, x_max - x_min)
-        y_range = max(1.0, y_max - y_min)
+        return img
         
-        # Scale to slightly smaller than image size to leave some border
-        scale_factor = min(image_size[0] * 0.8 / x_range, image_size[1] * 0.8 / y_range)
-        points = points * scale_factor
-        
-        # Center in the image
-        center_offset = np.array([
-            (image_size[0] - points[:, 0].max() - points[:, 0].min()) / 2,
-            (image_size[1] - points[:, 1].max() - points[:, 1].min()) / 2
-        ])
-        points = points + center_offset
-        
-        # Convert to integer coordinates
-        points = points.astype(np.int32)
-        
-        # Draw lines connecting the points
-        if len(points) > 1:
-            cv2.polylines(image, [points], False, line_color, line_width)
-    
-    return image
+    except Exception as e:
+        print(f"Error creating image from strokes: {e}")
+        # Return blank image in case of error
+        return np.ones((height, width, 3), dtype=np.uint8) * 255
 
 def normalize_image(img_array, target_range=(0, 1)):
     """

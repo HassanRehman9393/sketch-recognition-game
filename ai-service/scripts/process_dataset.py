@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 import time
 
+# Add parent directory to path so that app module can be found
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Try to handle missing dependencies gracefully
 try:
     from app.core.data_processor import QuickDrawDataProcessor
@@ -41,7 +44,7 @@ def main():
     args = parser.parse_args()
     
     # Define default paths
-    base_dir = Path(__file__).parent / "app" / "datasets"
+    base_dir = Path(__file__).parent.parent / "data"
     raw_dir = base_dir / "raw"
     processed_dir = base_dir / "processed"
     
@@ -50,6 +53,14 @@ def main():
         raw_dir = Path(args.input_dir)
     if args.output_dir:
         processed_dir = Path(args.output_dir)
+    
+    # Ensure directories exist
+    base_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Looking for raw files in: {raw_dir}")
+    print(f"Raw directory contents: {[f.name for f in raw_dir.glob('*.ndjson')]}")
     
     # Create processor
     processor = QuickDrawDataProcessor(raw_dir, processed_dir)
@@ -98,7 +109,24 @@ def main():
         loader = QuickDrawDataLoader(raw_dir, processed_dir)
         available = loader.list_available_categories()
         
-        invalid_categories = [cat for cat in args.categories if cat not in available]
+        # Debug output to help diagnose the issue
+        print(f"Looking for raw files in: {raw_dir}")
+        print(f"Available categories found: {available}")
+        print(f"Raw directory contents: {list(raw_dir.glob('*.ndjson'))}")
+        
+        # More flexible category file check - look for full or partial matches
+        available_filenames = [f.stem for f in raw_dir.glob('*.ndjson')]
+        adjusted_available = []
+        
+        for filename in available_filenames:
+            # Handle filenames with format "category_5000.ndjson"
+            base_category = filename.split('_')[0]
+            adjusted_available.append(base_category)
+        
+        print(f"Adjusted available categories: {adjusted_available}")
+        
+        # Check against adjusted category names
+        invalid_categories = [cat for cat in args.categories if cat not in adjusted_available]
         if invalid_categories:
             print(f"Error: Categories not found: {', '.join(invalid_categories)}")
             print("Use --list to see available categories.")

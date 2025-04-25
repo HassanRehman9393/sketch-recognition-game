@@ -3,6 +3,9 @@ import os
 import sys
 from pathlib import Path
 
+# Add parent directory to path so that app module can be found
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Try to handle missing dependencies gracefully
 try:
     from app.core.data_loader import QuickDrawDataLoader, CATEGORIES
@@ -27,12 +30,13 @@ def main():
     
     args = parser.parse_args()
     
-    # Define default paths
-    base_dir = Path(__file__).parent / "app" / "datasets"
+    # Define default paths - corrected to use data folder
+    base_dir = Path(__file__).parent.parent / "data"
     raw_dir = base_dir / "raw"
     processed_dir = base_dir / "processed"
     
     # Create directories if they don't exist
+    base_dir.mkdir(parents=True, exist_ok=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
     
@@ -74,9 +78,9 @@ def main():
         print(f"No categories specified. Downloading default test categories: {', '.join(categories)}")
         print("Use --all to download all categories, or specify with --categories")
     
-    # Set image limit
-    max_images = 3000  # Always limit to 3000 images per category
-    print(f"Limiting downloads to exactly {max_images} images per category")
+    # Set image limit - Use the user-provided limit parameter
+    max_images = args.limit if args.limit else 5000
+    print(f"Limiting downloads to {max_images} images per category")
     
     # Download the dataset
     print(f"Starting download of {len(categories)} categories to {raw_dir}")
