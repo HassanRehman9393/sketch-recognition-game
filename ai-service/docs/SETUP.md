@@ -302,6 +302,126 @@ response = requests.post("http://localhost:5002/api/recognize",
 print(response.json())
 ```
 
+## Testing the API Endpoints
+
+After setting up the AI service and training your model, you can test the recognition API endpoints using the following methods:
+
+### 1. Using cURL
+
+Test the API endpoints from the command line using cURL:
+
+```bash
+# Test the status endpoint
+curl http://localhost:5002/api/status
+
+# Test the recognition endpoint with an image file
+curl -F "image=@test_images/apple.png" http://localhost:5002/api/recognize
+
+# Test with a base64 encoded image
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"image_data": "data:image/png;base64,..."}' \
+  http://localhost:5002/api/recognize
+```
+
+### 2. Using Python
+
+Use Python to test the API endpoints:
+
+```python
+import requests
+import base64
+from PIL import Image
+import io
+
+# Test the status endpoint
+response = requests.get('http://localhost:5002/api/status')
+print(response.json())
+
+# Test with image file
+with open('test_images/apple.png', 'rb') as f:
+    files = {'image': f}
+    response = requests.post('http://localhost:5002/api/recognize', files=files)
+    result = response.json()
+    print(f"Top prediction: {result['predictions'][0]['class']} with {result['predictions'][0]['confidence']:.2f}% confidence")
+
+# Test with base64 encoded image
+image = Image.open('test_images/apple.png')
+buffered = io.BytesIO()
+image.save(buffered, format="PNG")
+img_str = base64.b64encode(buffered.getvalue()).decode()
+payload = {"image_data": f"data:image/png;base64,{img_str}"}
+response = requests.post('http://localhost:5002/api/recognize', json=payload)
+print(response.json())
+```
+
+### 3. Using the Test Script
+
+We've included a convenient test script to check your API endpoints:
+
+```bash
+# Test the status endpoint
+python scripts/test_api.py --url http://localhost:5002
+
+# Test recognition with an image
+python scripts/test_api.py --url http://localhost:5002 --image test_images/apple.png
+
+# Run all tests
+python scripts/test_api.py --url http://localhost:5002 --all
+```
+
+### 4. Using a Web Browser
+
+For simple testing, you can access some endpoints directly in your browser:
+
+- API Status: http://localhost:5002/api/status
+- List Available Classes: http://localhost:5002/api/classes
+- List Available Models: http://localhost:5002/api/models
+
+### 5. Testing with Canvas Data
+
+To test with real canvas data (as would be sent from the frontend):
+
+```python
+import requests
+import json
+
+# Example canvas stroke data (simplified)
+canvas_data = {
+    "strokes": [
+        [{"x": 10, "y": 10}, {"x": 20, "y": 20}, {"x": 30, "y": 30}],
+        [{"x": 40, "y": 40}, {"x": 50, "y": 50}, {"x": 60, "y": 60}]
+    ]
+}
+
+# Send to the recognition endpoint
+response = requests.post(
+    'http://localhost:5002/api/recognize',
+    json=canvas_data,
+    headers={'Content-Type': 'application/json'}
+)
+
+# Print the results
+print(json.dumps(response.json(), indent=2))
+```
+
+### 6. Checking for Errors
+
+Test error handling by sending invalid requests:
+
+```bash
+# Test with empty request
+curl -X POST http://localhost:5002/api/recognize
+
+# Test with invalid JSON
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"invalid_key": "value"}' \
+  http://localhost:5002/api/recognize
+```
+
+These test methods verify that your recognition API endpoints are working correctly and properly handling various input formats and error conditions.
+
 ## Troubleshooting
 
 ### Common Issues

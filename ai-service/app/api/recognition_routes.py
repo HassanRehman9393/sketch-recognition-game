@@ -16,7 +16,7 @@ from PIL import Image, ImageOps
 from app.core.recognition import get_recognition_service
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('recognition_routes')
 
 # Create blueprint
@@ -33,18 +33,25 @@ def allowed_file(filename):
 def recognize():
     """
     Endpoint for sketch recognition
-    Accepts image data (base64 or file upload) or stroke data
+    
+    Accepts:
+    - JSON with 'image_data' (base64 encoded image)
+    - JSON with 'strokes' (array of stroke data)
+    - Multipart form with 'image' file
+    
+    Returns:
+    - JSON with recognition results and confidence scores
     """
     try:
         # Get recognition service
-        from app.core.recognition import get_recognition_service
         recognition_service = get_recognition_service()
         
         # Check if model is loaded
         if not recognition_service.model_loaded:
+            logger.error("Model not loaded when attempting recognition")
             return jsonify({
                 'success': False,
-                'error': 'Model not loaded',
+                'error': 'Model not loaded. Please try again later.',
                 'timestamp': time.time()
             }), 503
         
@@ -54,16 +61,20 @@ def recognize():
         # Check if the request has JSON data
         if request.is_json:
             data = request.get_json()
+            logger.debug(f"Received JSON request with keys: {list(data.keys())}")
             
             # Case 1: Base64 encoded image data
             if 'image_data' in data:
                 result = recognition_service.predict({'image_data': data['image_data']})
+                logger.info("Processed base64 image data successfully")
                 
             # Case 2: Stroke data
             elif 'strokes' in data:
                 result = recognition_service.predict({'strokes': data['strokes']})
+                logger.info(f"Processed stroke data with {len(data['strokes'])} strokes")
                 
             else:
+                logger.warning("Invalid JSON payload")
                 return jsonify({
                     'success': False,
                     'error': 'Invalid JSON data. Expected "image_data" or "strokes".',
@@ -73,6 +84,7 @@ def recognize():
         # Check if the request has form data with file
         elif 'image' in request.files:
             file = request.files['image']
+            logger.debug(f"Received file upload: {file.filename}")
             
             if file.filename == '':
                 return jsonify({
@@ -82,19 +94,31 @@ def recognize():
                 }), 400
             
             # Read and process the image
-            img = Image.open(file.stream)
-            result = recognition_service.predict(img)
+            try:
+                img = Image.open(file.stream)
+                logger.debug(f"Loaded image with size {img.size} and mode {img.mode}")
+                result = recognition_service.predict(img)
+                logger.info("Processed uploaded image successfully")
+            except Exception as img_err:
+                logger.error(f"Error processing image: {str(img_err)}")
+                return jsonify({
+                    'success': False,
+                    'error': f"Error processing image: {str(img_err)}",
+                    'timestamp': time.time()
+                }), 400
         
         else:
+            logger.warning("No valid input data in request")
             return jsonify({
                 'success': False,
-                'error': 'Invalid request. Expected JSON data or file upload.',
+                'error': 'Invalid request. Send either JSON with image_data/strokes or an image file.',
                 'timestamp': time.time()
             }), 400
         
         # Add processing time
         processing_time = time.time() - start_time
-        result['processing_time'] = processing_time
+        result['processing_time_ms'] = round(processing_time * 1000, 2)
+        result['timestamp'] = time.time()
         
         return jsonify(result)
     
@@ -104,6 +128,7 @@ def recognize():
         return jsonify({
             'success': False,
             'error': str(e),
+            'detailed_error': traceback.format_exc() if os.getenv('DEBUG') == 'True' else None,
             'timestamp': time.time()
         }), 500
 
@@ -177,15 +202,20 @@ def recognize_debug():
 
 @recognition_bp.route('/status', methods=['GET'])
 def status():
-    """Endpoint to check the status of the recognition service"""
+    """
+    Endpoint to check the status of the recognition service
+    
+    Returns:
+    - JSON with service status and model information
+    """
     try:
-        # Get recognition service status
-        from app.core.recognition import get_recognition_service
+        # Get recognition service
         recognition_service = get_recognition_service()
         model_info = recognition_service.get_model_info()
         
         # Build response
         response = {
+            'success': True,
             'status': 'online',
             'model': model_info,
             'timestamp': time.time()
@@ -196,6 +226,7 @@ def status():
     except Exception as e:
         logger.error(f"Error getting status: {str(e)}")
         return jsonify({
+            'success': False,
             'status': 'error',
             'error': str(e),
             'timestamp': time.time()
@@ -203,10 +234,14 @@ def status():
 
 @recognition_bp.route('/classes', methods=['GET'])
 def get_classes():
-    """Endpoint to get the list of classes supported by the model"""
+    """
+    Endpoint to get the list of classes supported by the model
+    
+    Returns:
+    - JSON with list of supported classes
+    """
     try:
         # Get recognition service
-        from app.core.recognition import get_recognition_service
         recognition_service = get_recognition_service()
         
         # Get class names
@@ -215,14 +250,16 @@ def get_classes():
         return jsonify({
             'success': True,
             'classes': class_names,
-            'count': len(class_names)
+            'count': len(class_names),
+            'timestamp': time.time()
         })
     
     except Exception as e:
         logger.error(f"Error getting class list: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'timestamp': time.time()
         }), 500
 
 @recognition_bp.route('/debug-image', methods=['GET'])

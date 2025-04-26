@@ -15,8 +15,9 @@ from pathlib import Path
 load_dotenv()
 
 # Configure logging - adjust level based on environment
+logging_level = os.getenv('LOG_LEVEL', 'INFO')
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, logging_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
@@ -34,12 +35,13 @@ def create_app():
     """Create and configure the Flask application"""
     app = Flask(__name__)
     
-    # Enable CORS
-    CORS(app)
+    # Configure CORS
+    allowed_origins = os.getenv('ALLOW_ORIGINS', 'http://localhost:3000').split(',')
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     
-    # Import and register blueprints
-    from app.routes.recognition_routes import recognition_bp
-    app.register_blueprint(recognition_bp, url_prefix='/api')
+    # Register blueprints
+    from app.api.recognition_routes import recognition_bp
+    app.register_blueprint(recognition_bp)
     
     # Root endpoint for health check
     @app.route('/', methods=['GET'])
@@ -48,7 +50,16 @@ def create_app():
             "status": "ok",
             "service": "sketch-recognition-ai-service"
         })
+    
+    # Error handlers
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify({"error": "Not found", "status": 404}), 404
         
+    @app.errorhandler(500)
+    def server_error(e):
+        return jsonify({"error": "Internal server error", "status": 500}), 500
+    
     return app
 
 def main():
