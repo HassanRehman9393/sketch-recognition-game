@@ -37,6 +37,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
+import GameManager from '@/components/Game/GameManager';
 
 interface Point {
   x: number;
@@ -73,7 +74,8 @@ const Canvas = () => {
   const { toast } = useToast();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const shareInputRef = useRef<HTMLInputElement>(null);
-  const [roomInfo, setRoomInfo] = useState<{name: string, code: string} | null>(null);
+  const [roomInfo, setRoomInfo] = useState<{name: string, code: string, host?: string} | null>(null);
+  const [isHost, setIsHost] = useState(false);
   
   // Colors array for the color picker
   const colors = [
@@ -81,38 +83,54 @@ const Canvas = () => {
     '#ffff00', '#ff00ff', '#00ffff', '#ffa500', '#800080'
   ];
 
-  // Get the room id from URL params or state
-  const [roomId, setRoomId] = useState<string | null>(
-    searchParams.get('roomId')
-  );
+  // Get the room id from URL params or local storage
+  const [roomId, setRoomId] = useState<string | null>(() => {
+    const roomIdFromUrl = searchParams.get('roomId');
+    const savedRoomId = localStorage.getItem('currentRoomId');
+    return roomIdFromUrl || savedRoomId || null;
+  });
   
-  // Update URL when room changes
+  // Save roomId to localStorage when it changes
   useEffect(() => {
     if (roomId) {
+      localStorage.setItem('currentRoomId', roomId);
       setSearchParams({ roomId });
     } else {
+      localStorage.removeItem('currentRoomId');
       setSearchParams({});
     }
   }, [roomId, setSearchParams]);
   
   // Join the room when roomId is available
   useEffect(() => {
-    if (roomId && socket && isConnected) {
-      socket.emit('join_room', { roomId }, (response: any) => {
+    if (roomId && socket && isConnected && user) {
+      // Check if we're attempting to reconnect
+      const isReconnecting = sessionStorage.getItem('wasInRoom') === roomId;
+      
+      socket.emit('join_room', { 
+        roomId, 
+        reconnecting: isReconnecting,
+        userId: user.id 
+      }, (response: any) => {
         if (response.success) {
+          // Mark that we're in this room (for refresh detection)
+          sessionStorage.setItem('wasInRoom', roomId);
+          
           toast({
-            title: 'Room Joined',
-            description: `You've joined ${response.roomName}`,
+            title: isReconnecting ? 'Reconnected' : 'Room Joined',
+            description: `You've ${isReconnecting ? 'reconnected to' : 'joined'} ${response.roomName}`,
             duration: 3000
           });
           
-          // Store room info for display
-          if (response.roomName) {
-            setRoomInfo({
-              name: response.roomName,
-              code: response.accessCode || roomId
-            });
-          }
+          // Store room info for display and track host status
+          setRoomInfo({
+            name: response.roomName,
+            code: response.accessCode || roomId,
+            host: response.hostId
+          });
+          
+          // Check if current user is host
+          setIsHost(response.isHost || user.id === response.hostId);
           
           // Load the canvas state from server
           if (response.canvasState && response.canvasState.lines) {
@@ -121,6 +139,15 @@ const Canvas = () => {
               lines: response.canvasState.lines
             }));
           }
+          
+          // Show warning if game is in progress (should only happen during reconnect)
+          if (response.gameInProgress) {
+            toast({
+              title: 'Game in Progress',
+              description: 'You are rejoining an active game',
+              duration: 3000
+            });
+          }
         } else {
           toast({
             title: 'Error',
@@ -128,6 +155,13 @@ const Canvas = () => {
             variant: 'destructive',
             duration: 5000
           });
+          
+          // If we can't join the room (e.g., game in progress), clear stored room info
+          if (response.error === 'Game already in progress. Cannot join now.') {
+            localStorage.removeItem('currentRoomId');
+            sessionStorage.removeItem('wasInRoom');
+          }
+          
           setRoomId(null);
         }
       });
@@ -136,9 +170,53 @@ const Canvas = () => {
     return () => {
       if (roomId && socket && isConnected) {
         socket.emit('leave_room', { roomId });
+        sessionStorage.removeItem('wasInRoom');
       }
     };
-  }, [roomId, socket, isConnected, toast]);
+  }, [roomId, socket, isConnected, toast, user]);
+  
+  // Listen for host changed events
+  useEffect(() => {
+    if (!socket || !isConnected || !user) return;
+    
+    const handleHostChanged = (data: {newHostId: string, newHostName: string}) => {
+      setIsHost(data.newHostId === user.id);
+      
+      toast({
+        title: 'Host Changed',
+        description: `${data.newHostName} is now the host`,
+        duration: 3000
+      });
+      
+      // Update roomInfo
+      setRoomInfo(prev => prev ? {
+        ...prev,
+        host: data.newHostId
+      } : null);
+    };
+    
+    socket.on('host_changed', handleHostChanged);
+    
+    return () => {
+      socket.off('host_changed', handleHostChanged);
+    };
+  }, [socket, isConnected, user, toast]);
+  
+  // Handle window beforeunload to mark potential refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // We don't need to return anything, just making sure the sessionStorage is set
+      if (roomId) {
+        sessionStorage.setItem('wasInRoom', roomId);
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [roomId]);
   
   // Listen for drawing events from other users
   useEffect(() => {
@@ -494,6 +572,8 @@ const Canvas = () => {
     setRoomId(null);
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
+    localStorage.removeItem('currentRoomId');
+    sessionStorage.removeItem('wasInRoom');
     
     toast({
       title: 'Room Left',
@@ -596,6 +676,17 @@ const Canvas = () => {
             </TooltipProvider>
           </div>
         </motion.div>
+
+        {/* Game Manager Component */}
+        {roomId && user && (
+          <div className="mb-4">
+            <GameManager 
+              roomId={roomId} 
+              isHost={isHost}
+              userId={user.id}
+            />
+          </div>
+        )}
 
         {/* Canvas with toolbar */}
         <div className="flex flex-col md:flex-row gap-4 h-full min-h-[70vh]">

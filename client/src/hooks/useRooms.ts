@@ -174,20 +174,40 @@ export function useRooms() {
       // Normalize room code if provided
       const normalizedRoomCode = roomCode ? roomCode.trim().toUpperCase() : undefined;
       
-      console.log('Attempting to join room with:', { roomId, roomCode: normalizedRoomCode });
+      // Check if this is a reconnection attempt
+      const isReconnecting = sessionStorage.getItem('wasInRoom') === roomId;
+      
+      console.log('Attempting to join room with:', { 
+        roomId, 
+        roomCode: normalizedRoomCode,
+        reconnecting: isReconnecting
+      });
       
       return new Promise((resolve, reject) => {
         socket.emit('join_room', { 
           roomId, 
-          roomCode: normalizedRoomCode 
+          roomCode: normalizedRoomCode,
+          reconnecting: isReconnecting
         }, (response: RoomResponse) => {
           setLoading(false);
           console.log('Join room response:', response);
           
           if (response.success) {
             setCurrentRoomId(response.roomId!);
+            
+            // Mark that we're in this room (for refresh detection)
+            if (response.roomId) {
+              sessionStorage.setItem('wasInRoom', response.roomId);
+            }
+            
             resolve(response);
           } else {
+            // If we can't join the room (e.g., game in progress), clear stored room info
+            if (response.error === 'Game already in progress. Cannot join now.') {
+              sessionStorage.removeItem('wasInRoom');
+              localStorage.removeItem('currentRoomId');
+            }
+            
             reject(new Error(response.error || 'Failed to join room'));
           }
         });
@@ -213,6 +233,10 @@ export function useRooms() {
     socket.emit('leave_room', { roomId: currentRoomId });
     setCurrentRoomId(null);
     setRoomUsers([]);
+    
+    // Clear stored room data
+    sessionStorage.removeItem('wasInRoom');
+    localStorage.removeItem('currentRoomId');
   }, [socket, isConnected, currentRoomId]);
 
   return {

@@ -10,18 +10,22 @@ import {
 import { UsersList } from '@/components/UsersList/UsersList';
 import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 import { Badge } from '@/components/ui/badge';
-import { FaSignOutAlt, FaCrown } from 'react-icons/fa';
+import { FaSignOutAlt, FaCrown, FaUsers, FaShareAlt } from 'react-icons/fa';
 
 interface RoomHeaderProps {
   roomId: string;
   roomName: string;
   roomCode?: string | null;
   onLeave: () => void;
+  playerCount: number;
+  isHost: boolean;
+  hostName?: string;
 }
 
-export function RoomHeader({ roomId, roomName, roomCode, onLeave }: RoomHeaderProps) {
+export function RoomHeader({ roomId, roomName, roomCode, onLeave, playerCount, isHost, hostName }: RoomHeaderProps) {
   const { roomUsers } = useRooms();
   const [hostUser, setHostUser] = useState<string | null>(null);
+  const [showShareDialog, setShowShareDialog] = useState(false);
   
   useEffect(() => {
     const host = roomUsers.find(user => user.isHost);
@@ -31,58 +35,36 @@ export function RoomHeader({ roomId, roomName, roomCode, onLeave }: RoomHeaderPr
   }, [roomUsers]);
   
   return (
-    <div className="flex justify-between items-center mb-4">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 p-4 bg-card rounded-lg border shadow-sm">
       <div className="flex flex-col">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold">
-            <span className="text-primary">Quick</span>Doodle Canvas
-          </h1>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>Room: {roomName}</span>
-          {hostUser && (
-            <div className="flex items-center gap-1">
-              <span className="mx-1">•</span>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="outline" className="flex items-center gap-1 border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2">
-                      <FaCrown size={10} />
-                      <span className="text-xs">{hostUser}</span>
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Room Host</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+          <h2 className="text-xl font-semibold">{roomName}</h2>
+          {roomCode && (
+            <Badge variant="outline" className="font-mono">
+              {roomCode}
+            </Badge>
           )}
         </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <FaUsers className="h-3 w-3" />
+            {playerCount} {playerCount === 1 ? 'player' : 'players'}
+          </span>
+          <span className="flex items-center gap-1">
+            <FaCrown className="h-3 w-3 text-yellow-500" />
+            Host: {hostName || 'Unknown'}
+          </span>
+        </div>
       </div>
-      
-      <div className="flex items-center gap-2">
-        {roomCode && <RoomCodeShare roomCode={roomCode} roomName={roomName} />}
-        <UsersList />
-        
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={onLeave}
-                className="gap-2"
-              >
-                <FaSignOutAlt />
-                Leave
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Leave Room</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+      <div className="flex gap-2 self-end sm:self-center">
+        <Button variant="outline" size="sm" onClick={() => setShowShareDialog(true)}>
+          <FaShareAlt className="mr-2 h-4 w-4" />
+          Share
+        </Button>
+        <Button variant="outline" size="sm" onClick={onLeave}>
+          <FaSignOutAlt className="mr-2 h-4 w-4" />
+          Leave Room
+        </Button>
       </div>
     </div>
   );

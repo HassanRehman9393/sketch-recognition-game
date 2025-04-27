@@ -168,11 +168,21 @@ export function RoomSelector({ onRoomSelected }: RoomSelectorProps) {
       onRoomSelected(roomId);
     } catch (err: any) {
       setError(err.message || 'Failed to join room');
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to join room',
-        variant: 'destructive',
-      });
+      
+      // Show specific error for game in progress
+      if (err.message === 'Game already in progress. Cannot join now.') {
+        toast({
+          title: 'Cannot Join Room',
+          description: 'A game is already in progress in this room',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: err.message || 'Failed to join room',
+          variant: 'destructive',
+        });
+      }
     }
   };
 

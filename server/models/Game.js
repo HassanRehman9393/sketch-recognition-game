@@ -23,6 +23,10 @@ const gameSchema = new mongoose.Schema({
     correctGuesses: {
       type: Number,
       default: 0
+    },
+    hasPlayed: {
+      type: Boolean,
+      default: false
     }
   }],
   currentWord: {
@@ -39,7 +43,7 @@ const gameSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['waiting', 'playing', 'finished'],
+    enum: ['waiting', 'playing', 'round_end', 'finished'],
     default: 'waiting'
   },
   startTime: {
@@ -51,10 +55,44 @@ const gameSchema = new mongoose.Schema({
   roundTimeLimit: {
     type: Number,
     default: 60 // seconds
+  },
+  roundStartTime: {
+    type: Date
+  },
+  correctGuessers: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    username: String,
+    guessTime: Number // Time in ms from round start
+  }],
+  wordOptions: [String], // Available words for selection
+  currentDrawerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   }
 }, {
   timestamps: true
 });
+
+// Method to get next drawer
+gameSchema.methods.getNextDrawer = function() {
+  // Find a player who hasn't drawn yet this round
+  const nextDrawer = this.players.find(player => 
+    !player.hasPlayed && player._id.toString() !== this.currentDrawerId?.toString()
+  );
+  
+  // If all players have played, reset for next round
+  if (!nextDrawer && this.currentRound < this.totalRounds) {
+    // Reset all players' hasPlayed status for the next round
+    this.players.forEach(player => player.hasPlayed = false);
+    this.currentRound += 1;
+    return this.players[0]; // Start with first player for the new round
+  }
+  
+  return nextDrawer || null;
+};
 
 const Game = mongoose.model('Game', gameSchema);
 
