@@ -1,59 +1,95 @@
-const axios = require('axios');
+const aiService = require('../services/aiService');
+const logger = require('../utils/logger');
 
-// Proxy sketch recognition request to Python AI service
+/**
+ * Controller for AI-related endpoints
+ */
 exports.recognizeSketch = async (req, res) => {
   try {
+    // Get image data from request
     const { imageData } = req.body;
     
     if (!imageData) {
-      return res.status(400).json({ message: 'Image data is required' });
+      logger.warn('Sketch recognition attempt with missing image data');
+      return res.status(400).json({
+        success: false,
+        message: 'Image data is required'
+      });
     }
     
-    // Forward the request to Python AI service
-    const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:5001';
+    logger.info('Processing sketch recognition request');
+    const startTime = Date.now();
     
-    const response = await axios.post(`${aiServiceUrl}/recognize`, {
-      imageData
-    }, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
+    // Call AI service
+    const result = await aiService.recognizeSketch(imageData);
+    
+    // Calculate processing time
+    const processingTime = Date.now() - startTime;
+    logger.info(`Sketch recognition completed in ${processingTime}ms`);
+    
+    // Return recognition results
+    return res.json({
+      success: true,
+      data: result,
+      processingTime
     });
-    
-    res.json(response.data);
   } catch (error) {
-    console.error('AI recognition error:', error);
+    logger.error(`Sketch recognition error: ${error.message}`);
     
-    if (error.response) {
-      // Forward error from AI service
-      return res.status(error.response.status).json(error.response.data);
-    }
+    // Determine status code (use error's status code if available)
+    const statusCode = error.statusCode || 500;
     
-    res.status(500).json({ 
-      message: 'Failed to recognize sketch', 
-      error: error.message 
+    return res.status(statusCode).json({
+      success: false,
+      message: 'Failed to recognize sketch',
+      error: error.message,
+      details: error.isAIServiceError ? error.details : undefined
     });
   }
 };
 
-// Get word prompt for drawing
-exports.getWordPrompt = async (req, res) => {
+/**
+ * Get AI service status
+ */
+exports.getServiceStatus = async (req, res) => {
   try {
-    // Hard-coded list of words for Pictionary
-    const wordList = [
-      'apple', 'banana', 'cat', 'dog', 'elephant', 'fish', 'giraffe',
-      'house', 'island', 'jacket', 'key', 'lamp', 'mountain', 'notebook',
-      'orange', 'pencil', 'queen', 'rainbow', 'sun', 'tree', 'umbrella',
-      'violin', 'watch', 'xylophone', 'yacht', 'zebra', 'airplane',
-      'bicycle', 'carrot', 'dolphin'
-    ];
+    // Get status from AI service
+    const status = await aiService.getStatus();
     
-    // Select a random word
-    const randomIndex = Math.floor(Math.random() * wordList.length);
-    const word = wordList[randomIndex];
-    
-    res.json({ word });
+    return res.json({
+      success: true,
+      status
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get word prompt', error: error.message });
+    logger.error(`Error getting AI service status: ${error.message}`);
+    
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: 'Failed to get AI service status',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get available recognition classes
+ */
+exports.getClasses = async (req, res) => {
+  try {
+    // Get classes from AI service
+    const classes = await aiService.getClasses();
+    
+    return res.json({
+      success: true,
+      classes: classes.classes || []
+    });
+  } catch (error) {
+    logger.error(`Error getting recognition classes: ${error.message}`);
+    
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: 'Failed to get recognition classes',
+      error: error.message
+    });
   }
 };

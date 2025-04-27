@@ -6,8 +6,10 @@ const socketIo = require('socket.io');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const roomRoutes = require('./routes/roomRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const { initializeSocket } = require('./socket/socketHandler');
 const socketAuthMiddleware = require('./middleware/socketAuth');
+const logger = require('./utils/logger');
 
 // Load environment variables
 dotenv.config();
@@ -17,7 +19,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));  // Increased limit for image data
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
@@ -26,6 +28,7 @@ app.use(cors({
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/ai', aiRoutes);  // Add AI routes
 
 // Default route
 app.get('/', (req, res) => {
@@ -51,20 +54,21 @@ initializeSocket(io);
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
-    console.log('MongoDB Connected');
+    logger.info('MongoDB Connected');
     
     // Start server
     const PORT = process.env.PORT || 5001;
     server.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Socket.io server configured and ready`);
+      logger.info(`Server running on port ${PORT}`);
+      logger.info(`Socket.io server configured and ready`);
     });
   })
   .catch(err => {
-    console.error('MongoDB connection error:', err.message);
+    logger.error('MongoDB connection error: ' + err.message);
   });
 
 // Handle unexpected errors
 process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
+  logger.error(`Unhandled Rejection: ${err.message}`);
+  logger.error(err.stack);
 });
