@@ -19,7 +19,10 @@ const WORD_LIST = [
 const RECOGNITION_CATEGORIES = [
   'airplane', 'apple', 'bicycle', 'cat', 'dog',
   'car', 'fish', 'house', 'moon', 'sun',
-  'tree', 'flower', 'umbrella', 'bird', 'book'
+  'tree', 'flower', 'umbrella', 'bird', 'book',
+  'chair', 'clock', 'cloud', 'cup', 'door',
+  'face', 'hat', 'key', 'shoe', 'star',
+  'table', 'train', 'pizza', 'pants', 'guitar'
 ];
 
 /**

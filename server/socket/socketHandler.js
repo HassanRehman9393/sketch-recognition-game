@@ -24,6 +24,20 @@ const roomCodes = new Map();
 // Map to track active game sessions
 const activeGames = new Map();
 
+// Helper function to broadcast room list - moved outside the connection handler
+function broadcastRoomsList(io) {
+  const publicRooms = Array.from(rooms.values())
+    .filter(r => !r.isPrivate)
+    .map(r => ({
+      id: r.id,
+      name: r.name,
+      userCount: r.users.size,
+      isPrivate: false
+    }));
+    
+  io.emit('rooms_list', publicRooms);
+}
+
 /**
  * Initialize socket.io handlers
  * @param {SocketIO.Server} io Socket.io server instance
@@ -97,7 +111,7 @@ function initializeSocket(io) {
       });
       
       // Send updated room list to all users (only public rooms)
-      broadcastRoomsList();
+      broadcastRoomsList(io);
       
       if (callback) {
         callback({ 
@@ -107,20 +121,6 @@ function initializeSocket(io) {
         });
       }
     });
-    
-    // Helper function to broadcast room list
-    function broadcastRoomsList() {
-      const publicRooms = Array.from(rooms.values())
-        .filter(r => !r.isPrivate)
-        .map(r => ({
-          id: r.id,
-          name: r.name,
-          userCount: r.users.size,
-          isPrivate: false
-        }));
-        
-      io.emit('rooms_list', publicRooms);
-    }
     
     // Add explicit handler for get_rooms
     socket.on('get_rooms', (callback) => {
@@ -195,7 +195,7 @@ function initializeSocket(io) {
         return;
       }
       
-      // Add user to the userSocketMap for reconnection handling
+      // Add user to the userSocketMap for reconnection handling - always update this mapping
       userSocketMap.set(user.userId, socket.id);
       
       // Check if user is already in room (possibly reconnecting)
@@ -355,7 +355,9 @@ function initializeSocket(io) {
       if (room.canvasState.lines.length > 0) {
         // Find the last line drawn by this user
         for (let i = room.canvasState.lines.length - 0; i >= 0; i--) {
-          if (room.canvasState.lines[i].userId === user.userId) {
+          const line = room.canvasState.lines[i];
+          // Add null check before accessing userId property
+          if (line && line.userId === user.userId) {
             // Move the line from lines array to undoStack
             const removedLine = room.canvasState.lines.splice(i, 1)[0];
             if (!room.canvasState.undoStack) room.canvasState.undoStack = [];
@@ -899,7 +901,7 @@ function handleUserLeaveRoom(socket, io, room, user) {
     console.log(`Room deleted: ${room.name} (${room.id})`);
     
     // Update rooms list for all users
-    broadcastRoomsList();
+    broadcastRoomsList(io);
   }
   // If host leaves, assign a new host
   else if (user.userId === room.host) {

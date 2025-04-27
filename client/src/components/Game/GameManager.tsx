@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FaCrown, FaPlay, FaForward, FaStar, FaCheckCircle, FaUsers } from 'react-icons/fa';
-import { motion, AnimatePresence } from 'framer-motion';
-import WordSelector from './WordSelector';
-import GameTimer from './GameTimer';
-import PlayerScores from './PlayerScores';
-import GuessInput from './GuessInput';
+import { motion } from 'framer-motion';
+import WordSelector from '@/components/Game/WordSelector';
+import GameTimer from '@/components/Game/GameTimer';
+import PlayerScores from '@/components/Game/PlayerScores';
+import GuessInput from '@/components/Game/GuessInput';
 
 interface Player {
   userId: string;
