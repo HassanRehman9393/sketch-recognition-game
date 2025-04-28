@@ -1,6 +1,4 @@
 const { v4: uuidv4 } = require('uuid');
-const Game = require('../models/Game');
-const gameService = require('../services/gameService');
 
 // Store active rooms and users
 const rooms = new Map();

@@ -37,7 +37,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
-import GameManager from '@/components/Game/GameManager';
+
 
 interface Point {
   x: number;
@@ -676,17 +676,6 @@ const Canvas = () => {
             </TooltipProvider>
           </div>
         </motion.div>
-
-        {/* Game Manager Component */}
-        {roomId && user && (
-          <div className="mb-4">
-            <GameManager 
-              roomId={roomId} 
-              isHost={isHost}
-              userId={user.id}
-            />
-          </div>
-        )}
 
         {/* Canvas with toolbar */}
         <div className="flex flex-col md:flex-row gap-4 h-full min-h-[70vh]">

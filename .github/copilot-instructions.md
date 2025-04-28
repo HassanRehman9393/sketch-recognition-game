@@ -349,17 +349,7 @@ sketch-recognition-project/
    - Set up communication between services
    - Test end-to-end recognition flow
 
-2. Implement game state management
-   - Create game room functionality
-   - Implement player turns
-   - Add word selection for Pictionary mode
-   - Create scoring system based on recognition results
 
-3. Design and implement game UI
-   - Create game lobby interface
-   - Add game controls and indicators
-   - Implement timer and scoring display
-   - Design results screen
 
 ### Days 16-17: Game Logic & User Experience Enhancement
 
