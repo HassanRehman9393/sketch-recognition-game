@@ -1,9 +1,11 @@
 const axios = require('axios');
+const Game = require('../models/Game');
+const gameService = require('../services/gameService');
 
 // Proxy sketch recognition request to Python AI service
 exports.recognizeSketch = async (req, res) => {
   try {
-    const { imageData } = req.body;
+    const { imageData, roomId, isEarlySubmission = false } = req.body;
     
     if (!imageData) {
       return res.status(400).json({ message: 'Image data is required' });
@@ -20,6 +22,25 @@ exports.recognizeSketch = async (req, res) => {
       }
     });
     
+    // If this is part of a game, process the recognition for scoring
+    if (roomId) {
+      const game = await Game.findOne({ roomId });
+      
+      if (game && game.status === 'playing') {
+        // Process the recognition result for the game
+        const processingResult = isEarlySubmission 
+          ? await gameService.handleEarlySubmission(game, response.data)
+          : await gameService.processAiRecognition(game, response.data);
+          
+        // Return combined result
+        return res.json({
+          ...response.data,
+          gameResult: processingResult
+        });
+      }
+    }
+    
+    // If not part of a game or game not found, just return AI results
     res.json(response.data);
   } catch (error) {
     console.error('AI recognition error:', error);
@@ -39,14 +60,8 @@ exports.recognizeSketch = async (req, res) => {
 // Get word prompt for drawing
 exports.getWordPrompt = async (req, res) => {
   try {
-    // Hard-coded list of words for Pictionary
-    const wordList = [
-      'apple', 'banana', 'cat', 'dog', 'elephant', 'fish', 'giraffe',
-      'house', 'island', 'jacket', 'key', 'lamp', 'mountain', 'notebook',
-      'orange', 'pencil', 'queen', 'rainbow', 'sun', 'tree', 'umbrella',
-      'violin', 'watch', 'xylophone', 'yacht', 'zebra', 'airplane',
-      'bicycle', 'carrot', 'dolphin'
-    ];
+    // Use the existing trainedCategories from gameService
+    const wordList = gameService.trainedCategories;
     
     // Select a random word
     const randomIndex = Math.floor(Math.random() * wordList.length);

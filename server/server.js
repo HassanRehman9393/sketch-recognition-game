@@ -6,6 +6,7 @@ const socketIo = require('socket.io');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const roomRoutes = require('./routes/roomRoutes');
+const apiRoutes = require('./routes/api');
 const { initializeSocket } = require('./socket/socketHandler');
 const socketAuthMiddleware = require('./middleware/socketAuth');
 
@@ -17,7 +18,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // Increased limit for image data
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
@@ -26,6 +27,7 @@ app.use(cors({
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api', apiRoutes);
 
 // Default route
 app.get('/', (req, res) => {

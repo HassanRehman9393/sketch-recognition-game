@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider } from './components/ui/theme-provider';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
+import { GameProvider } from './contexts/GameContext'; // Add GameProvider import
 import AuthGuard from './components/AuthGuard';
 import Layout from './components/Layout/Layout';
 import Home from './pages/Home';
@@ -17,24 +18,26 @@ function App() {
       <Router>
         <AuthProvider>
           <SocketProvider>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route 
-                  path="/game" 
-                  element={
-                    <AuthGuard>
-                      <Canvas />
-                    </AuthGuard>
-                  } 
-                />
-                <Route path="/how-to-play" element={<HowToPlay />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Layout>
-            <Toaster />
+            <GameProvider> {/* Add GameProvider here */}
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route 
+                    path="/game" 
+                    element={
+                      <AuthGuard>
+                        <Canvas />
+                      </AuthGuard>
+                    } 
+                  />
+                  <Route path="/how-to-play" element={<HowToPlay />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Layout>
+              <Toaster />
+            </GameProvider>
           </SocketProvider>
         </AuthProvider>
       </Router>

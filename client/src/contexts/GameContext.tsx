@@ -1,0 +1,625 @@
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useSocket } from './SocketContext';
+import { useAuth } from './AuthContext';
+import { useToast } from '@/components/ui/use-toast';
+
+interface Player {
+  userId: string;
+  username: string;
+  score: number;
+  isDrawing: boolean;
+  correctGuesses: number;
+}
+
+interface GameState {
+  gameId: string | null;
+  status: 'waiting' | 'playing' | 'round_end' | 'finished';
+  currentRound: number;
+  totalRounds: number;
+  currentDrawerId: string | null;
+  currentWord?: string;
+  wordHint?: string;
+  wordLength?: number;
+  wordOptions?: string[];
+  roundStartTime?: Date;
+  roundTimeLimit: number;
+  players: Player[];
+  correctGuesses: any[];
+  hasSubmitted: boolean;
+  aiPredictions?: Array<{
+    label: string;
+    confidence: number;
+  }>;
+  lastPredictionTime?: number;
+}
+
+interface GameContextType {
+  game: GameState;
+  isInGame: boolean;
+  isMyTurn: boolean;
+  timeRemaining: number;
+  aiPredictions: Array<{
+    label: string;
+    confidence: number;
+  }> | null;
+  startGame: (roomId: string) => Promise<boolean>;
+  selectWord: (roomId: string, word: string) => Promise<boolean>;
+  makeGuess: (roomId: string, guess: string) => void;
+  submitEarly: (roomId: string, imageData: string) => Promise<boolean>;
+  sendDrawingForPrediction: (roomId: string, imageData: string) => Promise<void>;
+  requestNextTurn: (roomId: string) => Promise<boolean>;
+  endGame: (roomId: string) => Promise<boolean>;
+}
+
+const defaultGameState: GameState = {
+  gameId: null,
+  status: 'waiting',
+  currentRound: 1,
+  totalRounds: 3,
+  currentDrawerId: null,
+  roundTimeLimit: 60,
+  players: [],
+  correctGuesses: [],
+  hasSubmitted: false,
+  wordOptions: [],
+  aiPredictions: []
+};
+
+const GameContext = createContext<GameContextType | undefined>(undefined);
+
+export function GameProvider({ children }: { children: ReactNode }) {
+  const { socket, isConnected } = useSocket();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [game, setGame] = useState<GameState>(defaultGameState);
+  const [timeRemaining, setTimeRemaining] = useState<number>(60);
+  const [countdown, setCountdown] = useState<NodeJS.Timeout | null>(null);
+  const [predictionThrottleTimeout, setPredictionThrottleTimeout] = useState<NodeJS.Timeout | null>(null);
+  
+  // Derived states
+  const isInGame = game.status === 'playing' || game.status === 'round_end';
+  const isMyTurn = !!user && !!game.currentDrawerId && user.id === game.currentDrawerId;
+  
+  // Reset game countdown when round ends
+  useEffect(() => {
+    if (game.status !== 'playing' && countdown) {
+      clearInterval(countdown);
+      setCountdown(null);
+    }
+  }, [game.status, countdown]);
+
+  // Setup socket event listeners
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+
+    // Game initialization event
+    const handleGameInitialized = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        gameId: data.gameId,
+        players: data.players || [],
+        totalRounds: data.totalRounds || 3,
+        roundTimeLimit: data.roundTimeLimit || 60,
+        status: data.status || 'waiting',
+        wordOptions: data.wordOptions || []
+      }));
+      
+      toast({
+        title: "Game Initialized",
+        description: "Game is ready, waiting for host to start",
+      });
+    };
+    
+    // Game start event
+    const handleGameStarted = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: 'playing',
+        currentRound: data.currentRound || 1,
+        roundTimeLimit: data.roundTimeLimit || 60,
+        currentDrawerId: data.currentDrawerId,
+        roundStartTime: new Date(data.roundStartTime),
+        hasSubmitted: false
+      }));
+      
+      // Start countdown timer
+      startCountdownTimer(data.roundTimeLimit || 60);
+      
+      toast({
+        title: "Game Started",
+        description: `Round ${data.currentRound} has begun!`,
+      });
+    };
+    
+    // Word assignment for current drawer
+    const handleWordAssigned = (data: any) => {
+      if (data.isDrawing) {
+        setGame(prev => ({
+          ...prev,
+          currentWord: data.word,
+          hasSubmitted: false
+        }));
+        
+        toast({
+          title: "Your Turn to Draw!",
+          description: `You need to draw: ${data.word}`,
+        });
+      }
+    };
+    
+    // Word selection options
+    const handleSelectWord = (data: any) => {
+      if (data.isDrawing && data.wordOptions) {
+        setGame(prev => ({
+          ...prev,
+          status: 'waiting',
+          wordOptions: data.wordOptions,
+          currentRound: data.currentRound,
+          totalRounds: data.totalRounds,
+          hasSubmitted: false
+        }));
+        
+        toast({
+          title: "Your Turn!",
+          description: "Choose a word to draw",
+        });
+      }
+    };
+    
+    // Word selected by drawer
+    const handleWordSelected = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        wordLength: data.wordLength,
+        wordHint: data.hint,
+        hasSubmitted: false
+      }));
+    };
+    
+    // Correct guess event
+    const handleCorrectGuess = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        correctGuesses: [...(prev.correctGuesses || []), data],
+      }));
+      
+      toast({
+        title: `${data.username} guessed correctly!`,
+        description: `They guessed "${data.word}" in ${(data.timeTakenMs / 1000).toFixed(1)}s`,
+      });
+    };
+    
+    // Round end event
+    const handleRoundEnd = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: 'round_end',
+        players: data.players || prev.players,
+        correctGuesses: data.correctGuessers || []
+      }));
+      
+      // Stop countdown timer
+      if (countdown) {
+        clearInterval(countdown);
+        setCountdown(null);
+      }
+      
+      toast({
+        title: "Round Ended",
+        description: `The word was: ${data.word}`,
+      });
+    };
+    
+    // Early submission result
+    const handleEarlySubmitResult = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: 'round_end',
+        hasSubmitted: true,
+      }));
+      
+      // Stop countdown timer
+      if (countdown) {
+        clearInterval(countdown);
+        setCountdown(null);
+      }
+      
+      const wasRecognized = data.recognized;
+      
+      toast({
+        title: wasRecognized ? "AI Recognized Your Drawing!" : "AI Couldn't Recognize Your Drawing",
+        description: wasRecognized 
+          ? `You earned ${data.score} points!` 
+          : `The word was "${data.word}". Better luck next time!`,
+        variant: wasRecognized ? "default" : "destructive"
+      });
+    };
+    
+    // Next turn notification
+    const handleNextTurn = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: data.status || 'waiting',
+        currentDrawerId: data.currentDrawerId,
+        currentRound: data.currentRound,
+        totalRounds: data.totalRounds,
+        correctGuesses: [],
+        hasSubmitted: false,
+        wordOptions: data.wordOptions || []
+      }));
+      
+      toast({
+        title: "Next Turn",
+        description: `${data.drawerName}'s turn to draw`,
+      });
+    };
+    
+    // Game end event
+    const handleGameEnd = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: 'finished',
+        players: data.players || prev.players,
+      }));
+      
+      // Identify winner(s)
+      const winners = data.winners || [];
+      const winnerNames = winners.map((w: any) => w.username).join(', ');
+      
+      toast({
+        title: "Game Over!",
+        description: winners.length > 0 
+          ? `Winner${winners.length > 1 ? 's' : ''}: ${winnerNames}` 
+          : "Game has ended",
+        duration: 5000
+      });
+    };
+    
+    // Round timeout event
+    const handleRoundTimeout = (data: any) => {
+      setGame(prev => ({
+        ...prev,
+        status: 'round_end'
+      }));
+      
+      // Stop countdown timer
+      if (countdown) {
+        clearInterval(countdown);
+        setCountdown(null);
+      }
+      
+      toast({
+        title: "Round Timed Out",
+        description: `The word was "${data.word}"`,
+        variant: "destructive"
+      });
+    };
+    
+    // Player left during game
+    const handlePlayerLeft = (data: any) => {
+      setGame(prev => {
+        const updatedPlayers = prev.players.filter(p => p.userId !== data.userId);
+        return {
+          ...prev,
+          players: updatedPlayers
+        };
+      });
+      
+      toast({
+        title: "Player Left",
+        description: `${data.username} has left the game`,
+      });
+    };
+    
+    // Drawer left during their turn
+    const handleDrawerLeft = (data: any) => {
+      toast({
+        title: "Drawer Left",
+        description: `${data.username} left during their turn. The word was "${data.word}"`,
+        variant: "destructive"
+      });
+    };
+    
+    // AI Prediction event
+    const handleAIPrediction = (data: any) => {
+      if (data.predictions && Array.isArray(data.predictions)) {
+        setGame(prev => ({
+          ...prev,
+          aiPredictions: data.predictions,
+          lastPredictionTime: Date.now()
+        }));
+      }
+    };
+    
+    // Player disconnection during game - replaces the incorrectly named function
+    const handlePlayerDisconnected = (data: any) => {
+      // Update players list immediately
+      setGame(prev => {
+        // Remove the player who left
+        const updatedPlayers = prev.players.filter(p => p.userId !== data.userId);
+        
+        return {
+          ...prev,
+          players: updatedPlayers
+        };
+      });
+    };
+    
+    // Game state update (for reconnecting players)
+    const handleGameState = (data: any) => {
+      setGame({
+        gameId: data.gameId,
+        status: data.status,
+        currentRound: data.currentRound,
+        totalRounds: data.totalRounds,
+        currentDrawerId: data.currentDrawerId,
+        players: data.players || [],
+        roundTimeLimit: data.roundTimeLimit || 60,
+        correctGuesses: data.correctGuessers || [],
+        hasSubmitted: false,
+        wordOptions: data.wordOptions || [],
+        aiPredictions: data.aiPredictions || []
+      });
+      
+      // If game is playing and we just reconnected, start the timer
+      if (data.status === 'playing' && data.roundStartTime) {
+        const startTime = new Date(data.roundStartTime);
+        const now = new Date();
+        const elapsedSeconds = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+        const timeLeft = Math.max(0, (data.roundTimeLimit || 60) - elapsedSeconds);
+        
+        setTimeRemaining(timeLeft);
+        startCountdownTimer(timeLeft);
+      }
+    };
+    
+    // Register event listeners
+    socket.on('game:initialized', handleGameInitialized);
+    socket.on('game:started', handleGameStarted);
+    socket.on('game:wordAssigned', handleWordAssigned);
+    socket.on('game:selectWord', handleSelectWord);
+    socket.on('game:wordSelected', handleWordSelected);
+    socket.on('game:correctGuess', handleCorrectGuess);
+    socket.on('game:roundEnd', handleRoundEnd);
+    socket.on('game:earlySubmitResult', handleEarlySubmitResult);
+    socket.on('game:nextTurn', handleNextTurn);
+    socket.on('game:end', handleGameEnd);
+    socket.on('game:roundTimeout', handleRoundTimeout);
+    socket.on('game:playerLeft', handlePlayerLeft);
+    socket.on('game:drawerLeft', handleDrawerLeft);
+    socket.on('game:state', handleGameState);
+    socket.on('game:aiPrediction', handleAIPrediction);
+    socket.on('game:playerDisconnected', handlePlayerDisconnected);
+    
+    // Cleanup function
+    return () => {
+      socket.off('game:initialized', handleGameInitialized);
+      socket.off('game:started', handleGameStarted);
+      socket.off('game:wordAssigned', handleWordAssigned);
+      socket.off('game:selectWord', handleSelectWord);
+      socket.off('game:wordSelected', handleWordSelected);
+      socket.off('game:correctGuess', handleCorrectGuess);
+      socket.off('game:roundEnd', handleRoundEnd);
+      socket.off('game:earlySubmitResult', handleEarlySubmitResult);
+      socket.off('game:nextTurn', handleNextTurn);
+      socket.off('game:end', handleGameEnd);
+      socket.off('game:roundTimeout', handleRoundTimeout);
+      socket.off('game:playerLeft', handlePlayerLeft);
+      socket.off('game:drawerLeft', handleDrawerLeft);
+      socket.off('game:state', handleGameState);
+      socket.off('game:aiPrediction', handleAIPrediction);
+      socket.off('game:playerDisconnected', handlePlayerDisconnected);
+    };
+  }, [socket, isConnected, toast, user, countdown]);
+
+  // Helper function to start the countdown timer
+  const startCountdownTimer = (seconds: number) => {
+    // Clear any existing timer
+    if (countdown) {
+      clearInterval(countdown);
+    }
+    
+    setTimeRemaining(seconds);
+    
+    // Set up new timer
+    const timer = setInterval(() => {
+      setTimeRemaining(prevTime => {
+        if (prevTime <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+    
+    setCountdown(timer);
+    
+    return () => clearInterval(timer);
+  };
+
+  // Function to start game (host only)
+  const startGame = async (roomId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected) {
+        resolve(false);
+        return;
+      }
+      
+      socket.emit('game:initialize', { 
+        roomId,
+        gameSettings: {
+          rounds: 3,
+          timeLimit: 60,
+          useAI: true
+        }
+      }, (response: any) => {
+        if (response.success) {
+          // If we are the host, also handle word selection
+          if (response.wordOptions && user && game.gameId) {
+            setGame(prev => ({
+              ...prev,
+              gameId: response.gameId,
+              wordOptions: response.wordOptions
+            }));
+            resolve(true);
+          } else {
+            resolve(true);
+          }
+        } else {
+          toast({
+            title: "Error",
+            description: response.error || "Failed to initialize game",
+            variant: "destructive"
+          });
+          resolve(false);
+        }
+      });
+    });
+  };
+  
+  // Function to select a word and start round
+  const selectWord = async (roomId: string, word: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected) {
+        resolve(false);
+        return;
+      }
+      
+      socket.emit('game:start', { roomId, selectedWord: word }, (response: any) => {
+        if (response.success) {
+          resolve(true);
+        } else {
+          toast({
+            title: "Error",
+            description: response.error || "Failed to start game",
+            variant: "destructive"
+          });
+          resolve(false);
+        }
+      });
+    });
+  };
+  
+  // Function to make a guess
+  const makeGuess = (roomId: string, guess: string): void => {
+    if (!socket || !isConnected || !roomId || !guess.trim()) return;
+    
+    socket.emit('game:guess', { roomId, guess: guess.trim() });
+  };
+  
+  // Function to submit drawing early
+  const submitEarly = async (roomId: string, imageData: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected || !isMyTurn) {
+        resolve(false);
+        return;
+      }
+      
+      setGame(prev => ({ ...prev, hasSubmitted: true }));
+      
+      socket.emit('game:earlySubmit', { roomId, imageData }, (response: any) => {
+        if (response.success) {
+          resolve(true);
+        } else {
+          setGame(prev => ({ ...prev, hasSubmitted: false }));
+          toast({
+            title: "Error",
+            description: response.error || "Failed to submit drawing",
+            variant: "destructive"
+          });
+          resolve(false);
+        }
+      });
+    });
+  };
+  
+  // Send drawing for prediction with throttling
+  const sendDrawingForPrediction = async (roomId: string, imageData: string): Promise<void> => {
+    if (!socket || !isConnected || !isMyTurn) return;
+
+    // Don't send predictions too frequently - throttle to once every 1.5 seconds
+    if (predictionThrottleTimeout) {
+      return;
+    }
+
+    try {
+      socket.emit('game:requestPrediction', { 
+        roomId,
+        imageData,
+        word: game.currentWord // Send current word to help with AI context
+      });
+
+      // Set throttle timeout
+      const timeout = setTimeout(() => {
+        setPredictionThrottleTimeout(null);
+      }, 1500); // 1.5 seconds
+
+      setPredictionThrottleTimeout(timeout);
+    } catch (error) {
+      console.error('Error sending drawing for prediction:', error);
+    }
+  };
+  
+  // Function to request next turn
+  const requestNextTurn = async (roomId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected) {
+        resolve(false);
+        return;
+      }
+      
+      socket.emit('game:nextTurn', { roomId }, (response: any) => {
+        resolve(response.success);
+      });
+    });
+  };
+  
+  // Function to end game
+  const endGame = async (roomId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected) {
+        resolve(false);
+        return;
+      }
+      
+      socket.emit('game:end', { roomId }, (response: any) => {
+        if (response.success) {
+          setGame(defaultGameState);
+          resolve(true);
+        } else {
+          toast({
+            title: "Error",
+            description: response.error || "Failed to end game",
+            variant: "destructive"
+          });
+          resolve(false);
+        }
+      });
+    });
+  };
+
+  const value = {
+    game,
+    isInGame,
+    isMyTurn,
+    timeRemaining,
+    aiPredictions: game.aiPredictions || null,
+    startGame,
+    selectWord,
+    makeGuess,
+    submitEarly,
+    sendDrawingForPrediction,
+    requestNextTurn,
+    endGame
+  };
+
+  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
+}
+
+export function useGame() {
+  const context = useContext(GameContext);
+  if (context === undefined) {
+    throw new Error('useGame must be used within a GameProvider');
+  }
+  return context;
+}

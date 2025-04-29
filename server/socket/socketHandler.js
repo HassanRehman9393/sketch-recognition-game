@@ -1,9 +1,14 @@
 const { v4: uuidv4 } = require('uuid');
+const Game = require('../models/Game');
+const gameService = require('../services/gameService');
 
 // Store active rooms and users
 const rooms = new Map();
 const users = new Map();
 const userSocketMap = new Map(); // Map userId to socketId for reconnection
+
+// Map to track round timers for cancellation
+const roundTimers = new Map();
 
 // Generate a unique alphanumeric room code
 function generateRoomCode() {
@@ -187,7 +192,8 @@ function initializeSocket(io) {
       
       // Check if the game has already started and this is not a reconnection
       if (room.gameMode === 'pictionary' && !reconnecting && room.gameData && 
-          activeGames.has(roomId) && activeGames.get(roomId).status !== 'waiting') {
+          activeGames.has(roomId) && 
+          (activeGames.get(roomId).status === 'playing' || activeGames.get(roomId).status === 'round_end')) {
         console.log('[JOIN_ROOM] Error: Game already in progress');
         if (callback) callback({ success: false, error: 'Game already in progress. Cannot join now.' });
         return;
@@ -474,7 +480,7 @@ function initializeSocket(io) {
               hasPlayed: false
             }));
             
-            // Update word options
+            // Update word options - use AI categories
             const useAI = gameSettings?.useAI !== undefined ? gameSettings.useAI : true;
             existingGame.wordOptions = gameService.getRandomWords(3, useAI);
             
@@ -547,6 +553,12 @@ function initializeSocket(io) {
           }
         }
         
+        // Check minimum required players again
+        if (room.users.size < 2) {
+          if (callback) callback({ success: false, error: 'At least 2 players are required to start the game' });
+          return;
+        }
+        
         // Get list of players from room users
         const players = Array.from(room.users.values()).map(user => ({
           userId: user.userId,
@@ -562,7 +574,7 @@ function initializeSocket(io) {
         const timeLimit = gameSettings?.timeLimit || 60;
         const useAI = gameSettings?.useAI !== undefined ? gameSettings.useAI : true;
         
-        // Create new game record in database
+        // Create new game record in database - use AI trained categories for word options
         const game = new Game({
           roomId,
           players,
@@ -624,6 +636,12 @@ function initializeSocket(io) {
           }
         }
         
+        // Check minimum players requirement again
+        if (room.users.size < 2) {
+          if (callback) callback({ success: false, error: 'At least 2 players are required to start the game' });
+          return;
+        }
+        
         // Set initial drawer (host for first round)
         const firstDrawer = room.host;
         game.currentDrawerId = firstDrawer;
@@ -674,10 +692,13 @@ function initializeSocket(io) {
           hint: game.currentWord.replace(/[a-zA-Z]/g, '_')
         });
         
-        // Set timer for round end
-        setTimeout(() => {
-          endRound(io, roomId);
+        // Set timer for round end and store it for possible cancellation
+        const timerId = setTimeout(() => {
+          handleRoundTimeout(io, roomId);
         }, game.roundTimeLimit * 1000);
+        
+        // Store timer reference for possible cancellation
+        roundTimers.set(roomId, timerId);
         
         if (callback) callback({ success: true });
         
@@ -866,7 +887,160 @@ function initializeSocket(io) {
         });
       }
     });
+
+    // Handle early drawing submission
+    socket.on('game:earlySubmit', async ({ roomId, imageData }, callback) => {
+      try {
+        const room = rooms.get(roomId);
+        const user = users.get(socket.id);
+        
+        if (!room || !user) {
+          if (callback) callback({ success: false, error: 'Room or user not found' });
+          return;
+        }
+        
+        // Verify this user is the current drawer
+        const game = activeGames.get(roomId);
+        if (!game || game.status !== 'playing' || 
+            user.userId !== game.currentDrawerId.toString()) {
+          if (callback) callback({ success: false, error: 'You are not the current drawer' });
+          return;
+        }
+        
+        // Cancel round timer if it exists
+        if (roundTimers.has(roomId)) {
+          clearTimeout(roundTimers.get(roomId));
+          roundTimers.delete(roomId);
+        }
+        
+        // Forward sketch to AI for recognition
+        try {
+          const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:5001';
+          const axios = require('axios');
+          
+          const aiResponse = await axios.post(`${aiServiceUrl}/recognize`, {
+            imageData,
+            roomId,
+            isEarlySubmission: true
+          });
+          
+          // Process the AI response
+          const recognitionResult = aiResponse.data;
+          const processingResult = await gameService.handleEarlySubmission(
+            game, 
+            recognitionResult
+          );
+          
+          // Update game status
+          game.status = 'round_end';
+          await game.save();
+          
+          // Broadcast round results to all players
+          io.to(roomId).emit('game:earlySubmitResult', {
+            drawer: {
+              userId: user.userId,
+              username: user.username
+            },
+            word: game.currentWord,
+            aiRecognition: recognitionResult.predictions,
+            score: processingResult.score,
+            recognized: processingResult.recognized,
+            timeTaken: processingResult.timeTakenSeconds,
+            isEarlySubmission: true
+          });
+          
+          // End the round with results
+          await endRound(io, roomId);
+          
+          if (callback) callback({ 
+            success: true, 
+            ...processingResult
+          });
+        } catch (aiError) {
+          console.error('AI recognition error:', aiError);
+          if (callback) callback({ success: false, error: 'Failed to process drawing' });
+        }
+      } catch (error) {
+        console.error('Error handling early submission:', error);
+        if (callback) callback({ success: false, error: 'Server error' });
+      }
+    });
+    
+    // Auto-progress to next turn
+    socket.on('game:autoProgress', async ({ roomId, delay = 3000 }, callback) => {
+      try {
+        const room = rooms.get(roomId);
+        const user = users.get(socket.id);
+        
+        // Only host can trigger auto-progression
+        if (!room || !user || user.userId !== room.host) {
+          if (callback) callback({ success: false, error: 'Unauthorized' });
+          return;
+        }
+        
+        // Schedule next turn setup
+        setTimeout(async () => {
+          const success = await setupNextTurn(io, roomId);
+          if (!success) {
+            console.error('Failed to auto-progress to next turn');
+          }
+        }, delay);
+        
+        if (callback) callback({ success: true });
+      } catch (error) {
+        console.error('Error in auto-progression:', error);
+        if (callback) callback({ success: false, error: 'Server error' });
+      }
+    });
   });
+}
+
+/**
+ * Handle round timeout when timer expires
+ * @param {Object} io Socket.io server instance
+ * @param {string} roomId Room ID
+ */
+async function handleRoundTimeout(io, roomId) {
+  try {
+    console.log(`Round timer expired for room ${roomId}`);
+    const room = rooms.get(roomId);
+    if (!room) return;
+    
+    const game = activeGames.get(roomId);
+    if (!game || game.status !== 'playing') return;
+    
+    // Remove timer reference
+    roundTimers.delete(roomId);
+    
+    // Find current drawer
+    const drawer = game.players.find(p => 
+      p.userId.toString() === game.currentDrawerId.toString()
+    );
+    
+    if (!drawer) return;
+    
+    // Process timeout (no submission)
+    const timeoutResult = {
+      drawer: {
+        userId: drawer.userId,
+        username: drawer.username
+      },
+      word: game.currentWord,
+      recognized: false,
+      score: 0,
+      timeTaken: game.roundTimeLimit,
+      reason: 'timeout'
+    };
+    
+    // Broadcast timeout result
+    io.to(roomId).emit('game:roundTimeout', timeoutResult);
+    
+    // End the round
+    await endRound(io, roomId);
+    
+  } catch (error) {
+    console.error('Error handling round timeout:', error);
+  }
 }
 
 /**
@@ -889,12 +1063,25 @@ function handleUserLeaveRoom(socket, io, room, user) {
     username: user.username
   });
   
+  // Check if there's an active game
+  const game = activeGames.get(room.id);
+  if (game && (game.status === 'playing' || game.status === 'waiting' || game.status === 'round_end')) {
+    handlePlayerLeaveGame(io, room.id, user, game);
+  }
+  
   // If room is empty, delete it and its code
   if (room.users.size === 0) {
     if (room.accessCode) {
       roomCodes.delete(room.accessCode);
     }
     rooms.delete(room.id);
+    
+    // Cancel any active round timer
+    if (roundTimers.has(room.id)) {
+      clearTimeout(roundTimers.get(room.id));
+      roundTimers.delete(room.id);
+    }
+    
     activeGames.delete(room.id); // Also clean up any active game
     console.log(`Room deleted: ${room.name} (${room.id})`);
     
@@ -927,6 +1114,68 @@ function handleUserLeaveRoom(socket, io, room, user) {
 }
 
 /**
+ * Handle player leaving during an active game
+ * @param {Object} io Socket.io server instance 
+ * @param {string} roomId Room ID
+ * @param {Object} user User who left
+ * @param {Object} game Game object
+ */
+async function handlePlayerLeaveGame(io, roomId, user, game) {
+  try {
+    console.log(`Handling player leave during active game: ${user.username} from room ${roomId}`);
+    
+    // If the leaving user is the current drawer, end the round
+    if (game.currentDrawerId && game.currentDrawerId.toString() === user.userId) {
+      console.log(`Current drawer ${user.username} left, ending round`);
+      
+      // Cancel round timer
+      if (roundTimers.has(roomId)) {
+        clearTimeout(roundTimers.get(roomId));
+        roundTimers.delete(roomId);
+      }
+      
+      // Broadcast drawer left message
+      io.to(roomId).emit('game:drawerLeft', {
+        username: user.username,
+        word: game.currentWord
+      });
+      
+      // End the current round
+      await endRound(io, roomId);
+      return;
+    }
+    
+    // Remove player from game players array
+    const playerIndex = game.players.findIndex(p => p.userId.toString() === user.userId);
+    if (playerIndex !== -1) {
+      game.players.splice(playerIndex, 1);
+      
+      // If too few players remain, end the game
+      if (game.players.length < 2) {
+        io.to(roomId).emit('game:tooFewPlayers', {
+          message: 'Game ended as too few players remain'
+        });
+        
+        await endGame(io, roomId);
+        return;
+      }
+      
+      // Update game in DB
+      await game.save();
+      
+      // Notify remaining players
+      io.to(roomId).emit('game:playerLeft', {
+        userId: user.userId,
+        username: user.username,
+        remainingPlayers: game.players.length
+      });
+    }
+  } catch (error) {
+    console.error('Error handling player leave during game:', error);
+  }
+}
+
+/**
  * End the current round and prepare for the next
  * @param {Object} io Socket.io server instance
  * @param {string} roomId Room ID
@@ -938,6 +1187,12 @@ async function endRound(io, roomId) {
     
     const game = activeGames.get(roomId);
     if (!game) return false;
+    
+    // Cancel round timer if active
+    if (roundTimers.has(roomId)) {
+      clearTimeout(roundTimers.get(roomId));
+      roundTimers.delete(roomId);
+    }
     
     // Update game status
     game.status = 'round_end';
@@ -971,6 +1226,15 @@ async function endRound(io, roomId) {
     game.correctGuessers = [];
     await game.save();
     
+    // Set a timeout for auto-progression if enabled (host can override)
+    setTimeout(async () => {
+      // Check if still in round_end status (not manually progressed)
+      const currentGame = activeGames.get(roomId);
+      if (currentGame && currentGame.status === 'round_end') {
+        await setupNextTurn(io, roomId);
+      }
+    }, 8000); // 8 seconds delay for auto-progression
+    
     return true;
   } catch (error) {
     console.error('Error ending round:', error);
@@ -999,7 +1263,7 @@ async function setupNextTurn(io, roomId) {
     // Reset drawing flag for all players
     game.players.forEach(p => p.isDrawing = false);
     
-    // Get next drawer
+    // Get next drawer - this ensures equal turns for each player
     const nextDrawer = game.getNextDrawer();
     
     // If no next drawer, the game is complete
@@ -1008,7 +1272,7 @@ async function setupNextTurn(io, roomId) {
       return true;
     }
     
-    // Update next drawer and word options
+    // Update next drawer and word options - use AI trained categories
     game.currentDrawerId = nextDrawer.userId;
     game.wordOptions = gameService.getRandomWords(3, true);
     game.status = 'waiting';
@@ -1070,13 +1334,30 @@ async function endGame(io, roomId) {
     const game = activeGames.get(roomId);
     if (!game) return false;
     
+    // Cancel any active round timer
+    if (roundTimers.has(roomId)) {
+      clearTimeout(roundTimers.get(roomId));
+      roundTimers.delete(roomId);
+    }
+    
     // Update game status
     game.status = 'finished';
     game.endTime = new Date();
     
-    // Determine winner(s)
+    // Calculate final scores and aggregate results
+    const finalScores = calculateFinalScores(game);
+    
+    // Determine winner(s) - players with the highest score
     const highestScore = Math.max(...game.players.map(p => p.score));
     const winners = game.players.filter(p => p.score === highestScore);
+    
+    // Update game with final results
+    game.finalScores = finalScores;
+    game.winners = winners.map(w => ({
+      userId: w.userId,
+      username: w.username,
+      score: w.score
+    }));
     
     await game.save();
     
@@ -1102,7 +1383,12 @@ async function endGame(io, roomId) {
         userId: w.userId,
         username: w.username,
         score: w.score
-      }))
+      })),
+      finalScores: finalScores,
+      gameStats: {
+        totalRounds: game.currentRound,
+        duration: Math.floor((game.endTime - game.startTime) / 1000) // Duration in seconds
+      }
     });
     
     return true;
@@ -1110,6 +1396,72 @@ async function endGame(io, roomId) {
     console.error('Error ending game:', error);
     return false;
   }
+}
+
+/**
+ * Calculate final scores and game statistics
+ * @param {Object} game Game object
+ * @returns {Object} Final score summary
+ */
+function calculateFinalScores(game) {
+  // Calculate drawing scores (when player was drawer)
+  const drawingScores = {};
+  // Calculate guessing scores (when player was guesser)
+  const guessingScores = {};
+  
+  // Initialize scores for all players
+  game.players.forEach(player => {
+    drawingScores[player.userId] = 0;
+    guessingScores[player.userId] = 0;
+  });
+  
+  // For a real game we'd calculate these from the game history
+  // Here we'll just use the current scores as a simple approximation
+  game.players.forEach(player => {
+    // Estimate: 60% of score from guessing, 40% from drawing
+    guessingScores[player.userId] = Math.round(player.score * 0.6);
+    drawingScores[player.userId] = Math.round(player.score * 0.4);
+  });
+  
+  return {
+    playerScores: game.players.map(player => ({
+      userId: player.userId,
+      username: player.username,
+      totalScore: player.score,
+      drawingScore: drawingScores[player.userId],
+      guessingScore: guessingScores[player.userId],
+      correctGuesses: player.correctGuesses
+    })),
+    bestDrawer: getBestPlayer(drawingScores, game.players),
+    bestGuesser: getBestPlayer(guessingScores, game.players),
+  };
+}
+
+/**
+ * Get player with the highest score from a score object
+ * @param {Object} scores Score object mapping userId to score
+ * @param {Array} players Array of player objects
+ * @returns {Object} Best player info
+ */
+function getBestPlayer(scores, players) {
+  let bestScore = 0;
+  let bestUserId = null;
+  
+  Object.entries(scores).forEach(([userId, score]) => {
+    if (score > bestScore) {
+      bestScore = score;
+      bestUserId = userId;
+    }
+  });
+  
+  if (!bestUserId) return null;
+  
+  const player = players.find(p => p.userId.toString() === bestUserId);
+  return player ? {
+    userId: player.userId,
+    username: player.username,
+    score: bestScore
+  } : null;
 }
 
 module.exports = { initializeSocket };

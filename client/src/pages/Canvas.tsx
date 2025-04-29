@@ -3,8 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { 
   FaPaintBrush, FaEraser, FaUndo, FaRedo, 
-  FaTrash, FaSave, FaPalette, FaUsers, FaSignOutAlt, 
-  FaShareAlt, FaCopy  // Add these icons
+  FaTrash, FaSave, FaPalette
 } from "react-icons/fa";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -21,22 +20,12 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSocket } from "@/contexts/SocketContext";
+import { useGame } from "@/contexts/GameContext";
 import { useRooms } from "@/hooks/useRooms";
 import { RoomSelector } from "@/components/RoomSelector/RoomSelector";
-import { UsersList } from "@/components/UsersList/UsersList";
 import { useToast } from "@/components/ui/use-toast";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
+import { ActiveGame } from '@/components/GameUI/ActiveGame';
 
 
 interface Point {
@@ -68,14 +57,12 @@ const Canvas = () => {
     currentLine: null,
   });
   const [undoStack, setUndoStack] = useState<Line[]>([]);
+  const [isCanvasEnabled, setIsCanvasEnabled] = useState(false);
   const { user } = useAuth();
   const { socket, isConnected } = useSocket();
+  const { isInGame } = useGame();
   const { leaveRoom } = useRooms();
   const { toast } = useToast();
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const shareInputRef = useRef<HTMLInputElement>(null);
-  const [roomInfo, setRoomInfo] = useState<{name: string, code: string, host?: string} | null>(null);
-  const [isHost, setIsHost] = useState(false);
   
   // Colors array for the color picker
   const colors = [
@@ -89,6 +76,9 @@ const Canvas = () => {
     const savedRoomId = localStorage.getItem('currentRoomId');
     return roomIdFromUrl || savedRoomId || null;
   });
+  
+  const [roomInfo, setRoomInfo] = useState<{name: string, code: string, host?: string} | null>(null);
+  const [isHost, setIsHost] = useState(false);
   
   // Save roomId to localStorage when it changes
   useEffect(() => {
@@ -104,17 +94,20 @@ const Canvas = () => {
   // Join the room when roomId is available
   useEffect(() => {
     if (roomId && socket && isConnected && user) {
-      // Check if we're attempting to reconnect
+      // Define reconnection flag and persistent user id
       const isReconnecting = sessionStorage.getItem('wasInRoom') === roomId;
+      const persistentId = user.id; // Use the user's authenticated ID for persistence
       
+      // Join or rejoin the room
       socket.emit('join_room', { 
         roomId, 
         reconnecting: isReconnecting,
-        userId: user.id 
+        userId: persistentId
       }, (response: any) => {
         if (response.success) {
           // Mark that we're in this room (for refresh detection)
           sessionStorage.setItem('wasInRoom', roomId);
+          localStorage.setItem('userId', persistentId);
           
           toast({
             title: isReconnecting ? 'Reconnected' : 'Room Joined',
@@ -165,14 +158,16 @@ const Canvas = () => {
           setRoomId(null);
         }
       });
+      
+      // When component unmounts, leave room but persist identity
+      return () => {
+        socket.emit('leave_room', { 
+          roomId,
+          userId: persistentId,
+          temporary: true // Indicate this is a temporary disconnection
+        });
+      };
     }
-    
-    return () => {
-      if (roomId && socket && isConnected) {
-        socket.emit('leave_room', { roomId });
-        sessionStorage.removeItem('wasInRoom');
-      }
-    };
   }, [roomId, socket, isConnected, toast, user]);
   
   // Listen for host changed events
@@ -202,12 +197,29 @@ const Canvas = () => {
     };
   }, [socket, isConnected, user, toast]);
   
+  // Reset canvas when round ends
+  const handleRoundEnd = () => {
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    }
+    
+    setCanvasState({
+      lines: [],
+      currentLine: null
+    });
+    setUndoStack([]);
+  };
+  
   // Handle window beforeunload to mark potential refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
-      // We don't need to return anything, just making sure the sessionStorage is set
-      if (roomId) {
+      // Mark this as a temporary disconnect by keeping session data
+      if (roomId && user) {
         sessionStorage.setItem('wasInRoom', roomId);
+        localStorage.setItem('userId', user.id);
       }
     };
     
@@ -216,7 +228,7 @@ const Canvas = () => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [roomId]);
+  }, [roomId, user]);
   
   // Listen for drawing events from other users
   useEffect(() => {
@@ -354,7 +366,7 @@ const Canvas = () => {
 
   // Handle mouse/touch events with socket integration
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!roomId || !socket) return;
+    if (!roomId || !socket || !isCanvasEnabled) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -397,7 +409,7 @@ const Canvas = () => {
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing || !roomId || !socket) return;
+    if (!isDrawing || !roomId || !socket || !isCanvasEnabled) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -458,7 +470,7 @@ const Canvas = () => {
   };
 
   const endDrawing = () => {
-    if (!isDrawing || !roomId || !socket) return;
+    if (!isDrawing || !roomId || !socket || !isCanvasEnabled) return;
     setIsDrawing(false);
     
     setCanvasState(prev => {
@@ -483,7 +495,7 @@ const Canvas = () => {
 
   // Handle undo/redo/clear with socket integration
   const handleUndo = () => {
-    if (!roomId || !socket) return;
+    if (!roomId || !socket || !isCanvasEnabled) return;
     socket.emit('undo', { roomId });
     
     setCanvasState(prev => {
@@ -502,7 +514,7 @@ const Canvas = () => {
   };
 
   const handleRedo = () => {
-    if (!roomId || !socket || undoStack.length === 0) return;
+    if (!roomId || !socket || !isCanvasEnabled || undoStack.length === 0) return;
     
     const lineToRedo = undoStack[undoStack.length - 1];
     const newUndoStack = undoStack.slice(0, -1);
@@ -517,7 +529,7 @@ const Canvas = () => {
   };
 
   const handleClear = () => {
-    if (!roomId || !socket) return;
+    if (!roomId || !socket || !isCanvasEnabled) return;
     
     socket.emit('clear_canvas', { roomId });
     setCanvasState({ lines: [], currentLine: null });
@@ -582,33 +594,22 @@ const Canvas = () => {
     });
   };
 
-  // Generate shareable URL for the current room
-  const getRoomShareUrl = () => {
-    const baseUrl = window.location.origin;
-    return `${baseUrl}/game?roomId=${roomId}`;
-  };
-
-  // Copy the room URL to clipboard
-  const copyRoomUrl = () => {
-    const url = getRoomShareUrl();
-    navigator.clipboard.writeText(url).then(() => {
-      toast({
-        title: "Link copied!",
-        description: "Share this link with others to join your room",
-        duration: 2000
-      });
-    }).catch(err => {
-      console.error('Failed to copy: ', err);
-      toast({
-        title: "Copy failed",
-        description: "Please try again or copy the link manually",
-        variant: "destructive",
-        duration: 3000
-      });
+  // Add handler for when the game is left
+  const handleLeaveGame = () => {
+    leaveRoom();
+    setRoomId(null);
+    setCanvasState({ lines: [], currentLine: null });
+    setUndoStack([]);
+    localStorage.removeItem('currentRoomId');
+    sessionStorage.removeItem('wasInRoom');
+    
+    toast({
+      title: 'Game Left',
+      description: 'You have left the game',
+      duration: 3000
     });
-    setShareDialogOpen(false);
   };
-
+  
   // If we don't have a roomId, show room selector
   if (!roomId) {
     return (
@@ -632,50 +633,31 @@ const Canvas = () => {
     >
       <div className="flex flex-col h-full gap-4 max-w-6xl mx-auto w-full">
         <motion.div 
-          className="flex justify-between items-center mb-4"
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
         >
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold">
-              <span className="text-primary">Quick</span>Doodle Canvas
-            </h1>
-            {user && (
-              <div className="text-sm text-muted-foreground hidden md:block">
-                Drawing as: {user.username}
-              </div>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-2">
-            {roomInfo && roomInfo.code && (
-              <RoomCodeShare roomCode={roomInfo.code} roomName={roomInfo.name} />
-            )}
-            
-            {/* Add UsersList component to display host and members */}
-            <UsersList />
-            
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleLeaveRoom}
-                    className="gap-2"
-                  >
-                    <FaSignOutAlt />
-                    Leave
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Leave Room</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+          {/* Room header with game start button */}
+          <RoomHeader 
+            roomId={roomId}
+            roomName={roomInfo?.name || "Drawing Room"}
+            roomCode={roomInfo?.code}
+            isHost={isHost}
+            onLeave={handleLeaveRoom}
+          />
         </motion.div>
+
+        {/* Game UI - show when in game mode */}
+        {isInGame && (
+          <ActiveGame 
+            roomId={roomId}
+            canvasRef={canvasRef!}
+            isCanvasEnabled={isCanvasEnabled}
+            setCanvasEnabled={setIsCanvasEnabled}
+            onRoundEnd={handleRoundEnd}
+            onLeaveGame={handleLeaveGame}
+          />
+        )}
 
         {/* Canvas with toolbar */}
         <div className="flex flex-col md:flex-row gap-4 h-full min-h-[70vh]">
@@ -693,6 +675,7 @@ const Canvas = () => {
                     size="icon"
                     variant={tool === 'brush' ? 'default' : 'outline'}
                     onClick={() => setTool('brush')}
+                    disabled={!isCanvasEnabled}
                   >
                     <FaPaintBrush />
                   </Button>
@@ -708,6 +691,7 @@ const Canvas = () => {
                     size="icon"
                     variant={tool === 'eraser' ? 'default' : 'outline'}
                     onClick={() => setTool('eraser')}
+                    disabled={!isCanvasEnabled}
                   >
                     <FaEraser />
                   </Button>
@@ -725,6 +709,7 @@ const Canvas = () => {
                         size="icon"
                         variant="outline"
                         style={{ backgroundColor: color }}
+                        disabled={!isCanvasEnabled}
                       >
                         <FaPalette className="text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.5)]" />
                       </Button>
@@ -761,6 +746,7 @@ const Canvas = () => {
                   value={[brushWidth]}
                   onValueChange={(value) => setBrushWidth(value[0])}
                   className="w-full"
+                  disabled={!isCanvasEnabled}
                 />
               </div>
 
@@ -771,7 +757,7 @@ const Canvas = () => {
                       size="icon"
                       variant="outline"
                       onClick={handleUndo}
-                      disabled={canvasState.lines.length === 0}
+                      disabled={canvasState.lines.length === 0 || !isCanvasEnabled}
                     >
                       <FaUndo />
                     </Button>
@@ -787,7 +773,7 @@ const Canvas = () => {
                       size="icon"
                       variant="outline"
                       onClick={handleRedo}
-                      disabled={undoStack.length === 0}
+                      disabled={undoStack.length === 0 || !isCanvasEnabled}
                     >
                       <FaRedo />
                     </Button>
@@ -803,6 +789,7 @@ const Canvas = () => {
                       size="icon"
                       variant="destructive"
                       onClick={handleClear}
+                      disabled={!isCanvasEnabled}
                     >
                       <FaTrash />
                     </Button>
@@ -862,13 +849,13 @@ const Canvas = () => {
               value={[brushWidth]}
               onValueChange={(value) => setBrushWidth(value[0])}
               className="flex-1"
+              disabled={!isCanvasEnabled}
             />
           </div>
         </div>
       </div>
     </motion.div>
   );
-
 };
 
 export default Canvas;

@@ -65,13 +65,27 @@ const gameSchema = new mongoose.Schema({
       ref: 'User'
     },
     username: String,
-    guessTime: Number // Time in ms from round start
+    guessTime: Number, // Time in ms from round start
+    points: Number
   }],
   wordOptions: [String], // Available words for selection
   currentDrawerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }
+  },
+  // New fields for game results
+  finalScores: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  winners: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    username: String,
+    score: Number
+  }]
 }, {
   timestamps: true
 });
