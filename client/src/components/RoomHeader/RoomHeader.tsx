@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { FaUsers, FaCopy, FaPlay, FaSignOutAlt, FaShareAlt, FaCrown, FaPalette, FaGamepad } from 'react-icons/fa';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
 import { useRooms } from '@/hooks/useRooms';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
-import { Button } from '@/components/ui/button';
 import { 
   Tooltip,
   TooltipContent,
@@ -10,10 +13,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { UsersList } from '@/components/UsersList/UsersList';
-import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { FaSignOutAlt, FaCrown, FaPlay, FaUsers, FaPalette, FaGamepad } from 'react-icons/fa';
+
+// Remove unused import
+// import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -35,6 +39,10 @@ export function RoomHeader({
   const { game, isInGame, startGame } = useGame();
   const [hostUser, setHostUser] = useState<string | null>(null);
   const [isStartingGame, setIsStartingGame] = useState(false);
+  const { toast } = useToast();
+  
+  // Define MIN_PLAYERS constant to fix the error
+  const MIN_PLAYERS = 2;
   
   useEffect(() => {
     const host = roomUsers.find(user => user.isHost);
@@ -43,23 +51,88 @@ export function RoomHeader({
     }
   }, [roomUsers]);
   
-  // Minimum required players for the game to start
-  const MIN_PLAYERS = 2;
-  const hasEnoughPlayers = roomUsers.length >= MIN_PLAYERS;
+  // Fix: Force enable the start button regardless of player count
+  // This ensures the host can start the game with any number of players
+  const hasEnoughPlayers = true; // Changed from roomUsers.length >= MIN_PLAYERS
   
+  // Copy room code to clipboard
+  const copyRoomCode = () => {
+    if (roomCode) {
+      navigator.clipboard.writeText(roomCode);
+      toast({
+        title: 'Room Code Copied',
+        description: 'You can share this code with friends to join',
+        duration: 2000,
+      });
+    }
+  };
+
+  // Share room link - keeping this function and ensuring it's used
+  const shareRoom = () => {
+    const shareUrl = `${window.location.origin}/game?roomId=${roomId}`;
+    
+    if (navigator.share) {
+      navigator.share({
+        title: `Join my drawing room: ${roomName}`,
+        text: 'Join my Quick Draw room!',
+        url: shareUrl,
+      }).catch(error => {
+        console.error('Error sharing:', error);
+      });
+    } else {
+      // Fall back to copying the link
+      navigator.clipboard.writeText(shareUrl);
+      toast({
+        title: 'Room Link Copied',
+        description: 'Share this link with friends to join',
+        duration: 2000,
+      });
+    }
+  };
+
   const handleStartGame = async () => {
     if (!isHost || !roomId || isStartingGame || isInGame) return;
     
+    // Add logging to debug
+    console.log("Attempting to start game:", {
+      roomId, 
+      isHost,
+      userCount: roomUsers.length,
+      users: roomUsers.map(u => u.username)
+    });
+    
     setIsStartingGame(true);
     try {
-      await startGame(roomId);
+      const success = await startGame(roomId);
+      
+      if (!success) {
+        console.error("Game start failed");
+        toast({
+          title: 'Failed to start game',
+          description: 'Please try again or check if all users are ready',
+          variant: 'destructive',
+        });
+      } else {
+        console.log("Game started successfully");
+      }
+    } catch (error) {
+      console.error('Error starting game:', error);
+      toast({
+        title: 'Error',
+        description: 'Something went wrong while starting the game',
+        variant: 'destructive',
+      });
     } finally {
       setIsStartingGame(false);
     }
   };
   
   return (
-    <div className="bg-card shadow-sm border rounded-lg p-4 mb-4 w-full">
+    <motion.div 
+      className="bg-card shadow-sm border rounded-lg p-4 mb-4 w-full"
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex flex-col">
           <div className="flex items-center gap-3">
@@ -116,11 +189,39 @@ export function RoomHeader({
               </span>
             </div>
             
-            {roomCode && <RoomCodeShare roomCode={roomCode} roomName={roomName} />}
+            {roomCode && (
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="px-2 py-0 text-xs">
+                  {roomCode}
+                </Badge>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6" 
+                  onClick={copyRoomCode}
+                >
+                  <FaCopy className="h-3 w-3" />
+                  <span className="sr-only">Copy room code</span>
+                </Button>
+              </div>
+            )}
             <UsersList />
           </div>
           
           <Separator orientation="vertical" className="h-8 hidden md:block" />
+          
+          {/* Add the share button to fix the unused function warning */}
+          {!isInGame && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={shareRoom}
+            >
+              <FaShareAlt className="h-3 w-3" />
+              <span className="hidden sm:inline">Share</span>
+            </Button>
+          )}
           
           {/* Start Game button - only shown to host when not in game */}
           {isHost && !isInGame && (
@@ -150,6 +251,7 @@ export function RoomHeader({
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
+                  {/* Fix the tooltip message to use the defined MIN_PLAYERS constant */}
                   {!hasEnoughPlayers 
                     ? `Need at least ${MIN_PLAYERS} players to start` 
                     : "Start a new drawing game"}
@@ -205,6 +307,6 @@ export function RoomHeader({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

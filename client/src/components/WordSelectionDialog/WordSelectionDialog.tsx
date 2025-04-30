@@ -1,16 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { useGame } from "@/contexts/GameContext";
-import { FaPencilAlt, FaRandom } from 'react-icons/fa';
+import { useGame } from '@/contexts/GameContext';
+import { FaPencilAlt, FaSpinner } from 'react-icons/fa';
+import { Progress } from '@/components/ui/progress';
 
 interface WordSelectionDialogProps {
   open: boolean;
@@ -20,95 +12,114 @@ interface WordSelectionDialogProps {
 }
 
 export function WordSelectionDialog({ 
-  open, 
+  open,
   roomId, 
-  words = [],
-  onSelectionComplete
+  words,
+  onSelectionComplete 
 }: WordSelectionDialogProps) {
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const { selectWord } = useGame();
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectedWordIndex, setSelectedWordIndex] = useState<number | null>(null);
+  const [selectionTimer, setSelectionTimer] = useState(100);
+  
+  useEffect(() => {
+    console.log("WordSelectionDialog mounted with words:", words);
+  }, [words]);
 
-  const handleRandomSelection = () => {
-    if (words.length > 0) {
-      const randomIndex = Math.floor(Math.random() * words.length);
-      setSelectedWord(words[randomIndex]);
+  // Add a gentle selection countdown timer to encourage quick decision
+  useEffect(() => {
+    if (!open) return;
+    
+    const timer = setInterval(() => {
+      setSelectionTimer(prev => {
+        if (prev <= 0) return 0;
+        return prev - 0.5;
+      });
+    }, 100);
+    
+    return () => clearInterval(timer);
+  }, [open]);
+  
+  const handleWordSelect = async (word: string, index: number) => {
+    if (isSelecting) return;
+    
+    setSelectedWordIndex(index);
+    setIsSelecting(true);
+    
+    try {
+      console.log(`Selecting word: "${word}"`);
+      const success = await selectWord(roomId, word);
+      
+      if (success) {
+        console.log("Word selection successful");
+        onSelectionComplete();
+      } else {
+        console.error("Failed to select word");
+        setSelectedWordIndex(null);
+      }
+    } catch (error) {
+      console.error("Error selecting word:", error);
+    } finally {
+      setIsSelecting(false);
     }
   };
 
-  const handleSelectWord = async () => {
-    if (!selectedWord) return;
-    
-    setIsLoading(true);
-    const success = await selectWord(roomId, selectedWord);
-    
-    if (success) {
-      onSelectionComplete();
-    }
-    setIsLoading(false);
-  };
-
+  // Make sure the dialog stays visible and matches the app theme
   return (
-    <Dialog open={open}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle className="text-center text-2xl">Choose a Word to Draw</DialogTitle>
-          <DialogDescription className="text-center">
-            Select one of the words below that you'll draw for others to guess
-          </DialogDescription>
-        </DialogHeader>
-        
-        <div className="grid gap-4 py-6">
-          <div className="flex flex-col gap-3">
-            {words.map((word, index) => (
+    <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-md overflow-hidden">
+        <div className="p-6">
+          <div className="flex items-center justify-center mb-4">
+            <div className="p-3 rounded-full bg-primary/10 text-primary">
+              <FaPencilAlt className="h-6 w-6" />
+            </div>
+          </div>
+          
+          <h2 className="text-xl font-bold text-center mb-2">Choose a Word to Draw</h2>
+          <p className="text-muted-foreground text-center mb-4">
+            Select one of these words to draw. Other players will try to guess what you're drawing.
+          </p>
+          
+          {/* Countdown timer */}
+          <div className="mt-2 mb-6">
+            <Progress value={selectionTimer} className="h-1" />
+          </div>
+          
+          <div className="grid gap-3">
+            {words.map((word, i) => (
               <motion.div
-                key={word}
+                key={word || `word-${i}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
+                transition={{ delay: i * 0.1 }}
               >
-                <Button
-                  variant={selectedWord === word ? "default" : "outline"}
-                  className={`w-full text-lg py-6 ${selectedWord === word ? 'border-2 border-primary' : ''}`}
-                  onClick={() => setSelectedWord(word)}
+                <button
+                  className={`w-full p-4 text-center rounded-md border transition-all duration-200 
+                    hover:bg-primary/5 hover:border-primary/40 active:scale-[0.98] text-lg font-medium
+                    ${selectedWordIndex === i 
+                      ? 'border-primary bg-primary/10 shadow-md' 
+                      : 'border-border hover:shadow'}`}
+                  onClick={() => handleWordSelect(word, i)}
+                  disabled={isSelecting}
                 >
-                  {selectedWord === word && <FaPencilAlt className="mr-2" />}
                   {word}
-                </Button>
+                </button>
               </motion.div>
             ))}
           </div>
           
-          <div className="flex justify-center">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="flex items-center gap-2"
-              onClick={handleRandomSelection}
-            >
-              <FaRandom />
-              Random
-            </Button>
+          <div className="mt-6 text-center text-sm text-muted-foreground">
+            {isSelecting ? (
+              <div className="flex items-center justify-center gap-2">
+                <FaSpinner className="h-4 w-4 animate-spin" />
+                <span>Preparing your canvas...</span>
+              </div>
+            ) : (
+              <span>Choose carefully - everyone will try to guess this!</span>
+            )}
           </div>
         </div>
-        
-        <DialogFooter>
-          <Button
-            onClick={handleSelectWord}
-            disabled={!selectedWord || isLoading}
-            className="w-full"
-          >
-            {isLoading ? (
-              <span className="flex items-center gap-2">
-                <span className="animate-spin">◠</span>
-                Starting...
-              </span>
-            ) : (
-              <span>Start Drawing</span>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

@@ -94,6 +94,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     // Game initialization event
     const handleGameInitialized = (data: any) => {
+      console.log("Game initialized event received:", data);
+      
+      // Only show the "waiting for host" toast if the current user is not the host
+      const isCurrentUserHost = user && user.id === data.hostId;
+      
       setGame(prev => ({
         ...prev,
         gameId: data.gameId,
@@ -104,12 +109,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
         wordOptions: data.wordOptions || []
       }));
       
-      toast({
-        title: "Game Initialized",
-        description: "Game is ready, waiting for host to start",
-      });
+      if (!isCurrentUserHost) {
+        toast({
+          title: "Game Initialized",
+          description: "Game is ready, waiting for host to start",
+        });
+      }
     };
-    
+
     // Game start event
     const handleGameStarted = (data: any) => {
       setGame(prev => ({
@@ -147,21 +154,29 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     };
     
-    // Word selection options
+    // Word selection options - make sure this handler properly updates the game state
     const handleSelectWord = (data: any) => {
+      console.log("Word selection options received:", data);
+      
       if (data.isDrawing && data.wordOptions) {
-        setGame(prev => ({
-          ...prev,
-          status: 'waiting',
-          wordOptions: data.wordOptions,
-          currentRound: data.currentRound,
-          totalRounds: data.totalRounds,
-          hasSubmitted: false
-        }));
+        setGame(prev => {
+          console.log("Updating game state with word options:", data.wordOptions);
+          return {
+            ...prev,
+            status: 'waiting',
+            wordOptions: data.wordOptions,
+            currentRound: data.currentRound,
+            totalRounds: data.totalRounds,
+            hasSubmitted: false,
+            currentDrawerId: user?.id || null // Fix type error by providing null as fallback
+          };
+        });
         
+        // Force a clear toast message about what to do next
         toast({
           title: "Your Turn!",
-          description: "Choose a word to draw",
+          description: "Choose a word to draw from the options",
+          duration: 5000,
         });
       }
     };
@@ -441,9 +456,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const startGame = async (roomId: string): Promise<boolean> => {
     return new Promise((resolve) => {
       if (!socket || !isConnected) {
+        console.error("Cannot start game: Socket not connected");
         resolve(false);
         return;
       }
+      
+      console.log("Starting game for room:", roomId);
       
       socket.emit('game:initialize', { 
         roomId,
@@ -453,19 +471,32 @@ export function GameProvider({ children }: { children: ReactNode }) {
           useAI: true
         }
       }, (response: any) => {
+        console.log("Game initialize response:", response);
+        
         if (response.success) {
-          // If we are the host, also handle word selection
-          if (response.wordOptions && user && game.gameId) {
+          // Check if the response contains word options
+          if (response.wordOptions && Array.isArray(response.wordOptions) && response.wordOptions.length > 0) {
+            console.log("Word options received, updating game state:", response.wordOptions);
+            
+            // Update the game state with the word options
             setGame(prev => ({
               ...prev,
               gameId: response.gameId,
-              wordOptions: response.wordOptions
+              wordOptions: response.wordOptions,
+              status: 'waiting',
+              currentDrawerId: user?.id || null,
             }));
-            resolve(true);
-          } else {
-            resolve(true);
+            
+            toast({
+              title: "Your Turn to Draw",
+              description: "Select one of the words to draw",
+              duration: 8000,
+            });
           }
+          
+          resolve(true);
         } else {
+          console.error("Failed to initialize game:", response.error);
           toast({
             title: "Error",
             description: response.error || "Failed to initialize game",
@@ -476,22 +507,42 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     });
   };
-  
+
   // Function to select a word and start round
   const selectWord = async (roomId: string, word: string): Promise<boolean> => {
     return new Promise((resolve) => {
       if (!socket || !isConnected) {
+        console.error("Cannot select word: Socket not connected");
         resolve(false);
         return;
       }
       
-      socket.emit('game:start', { roomId, selectedWord: word }, (response: any) => {
+      console.log(`Selecting word: "${word}" for room: ${roomId}`);
+      
+      socket.emit('game:selectWord', { roomId, word }, (response: any) => {
+        console.log("Word selection response:", response);
+        
         if (response.success) {
+          // Update game state to show we're now playing with the selected word
+          setGame(prev => ({
+            ...prev,
+            currentWord: word,
+            wordOptions: [],
+            status: 'playing'
+          }));
+          
+          toast({
+            title: "Word Selected",
+            description: `You're now drawing: ${word}`,
+            duration: 3000
+          });
+          
           resolve(true);
         } else {
+          console.error("Failed to select word:", response.error);
           toast({
             title: "Error",
-            description: response.error || "Failed to start game",
+            description: response.error || "Failed to select word",
             variant: "destructive"
           });
           resolve(false);
@@ -499,14 +550,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     });
   };
-  
+
   // Function to make a guess
   const makeGuess = (roomId: string, guess: string): void => {
     if (!socket || !isConnected || !roomId || !guess.trim()) return;
     
     socket.emit('game:guess', { roomId, guess: guess.trim() });
   };
-  
+
   // Function to submit drawing early
   const submitEarly = async (roomId: string, imageData: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -532,7 +583,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     });
   };
-  
+
   // Send drawing for prediction with throttling
   const sendDrawingForPrediction = async (roomId: string, imageData: string): Promise<void> => {
     if (!socket || !isConnected || !isMyTurn) return;
@@ -548,18 +599,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
         imageData,
         word: game.currentWord // Send current word to help with AI context
       });
-
+      
       // Set throttle timeout
       const timeout = setTimeout(() => {
         setPredictionThrottleTimeout(null);
       }, 1500); // 1.5 seconds
-
+      
       setPredictionThrottleTimeout(timeout);
     } catch (error) {
       console.error('Error sending drawing for prediction:', error);
     }
   };
-  
+
   // Function to request next turn
   const requestNextTurn = async (roomId: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -573,7 +624,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     });
   };
-  
+
   // Function to end game
   const endGame = async (roomId: string): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -598,7 +649,25 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const value = {
+  // Debug game state changes with more details
+  useEffect(() => {
+    console.group('Game State Update');
+    console.log('Status:', game.status);
+    console.log('Current Drawer:', game.currentDrawerId);
+    console.log('Is user the drawer:', user?.id === game.currentDrawerId);
+    console.log('Word Options:', game.wordOptions);
+    console.log('Word Options Length:', game.wordOptions?.length || 0);
+    console.log('Current Word:', game.currentWord);
+    console.log('User ID:', user?.id);
+    console.log('UI State - showWordSelector in ActiveGame should be true if:', 
+      user?.id === game.currentDrawerId && 
+      game.status === 'waiting' && 
+      Array.isArray(game.wordOptions) && 
+      game.wordOptions.length > 0);
+    console.groupEnd();
+  }, [game.status, game.currentDrawerId, game.wordOptions, game.currentWord, user?.id]);
+
+  const value = { 
     game,
     isInGame,
     isMyTurn,
@@ -610,7 +679,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     submitEarly,
     sendDrawingForPrediction,
     requestNextTurn,
-    endGame
+    endGame,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

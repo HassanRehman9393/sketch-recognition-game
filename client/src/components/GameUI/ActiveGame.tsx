@@ -21,6 +21,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { GameEndScreen } from '@/components/GameEndScreen/GameEndScreen';
 import { DisconnectionAlert } from '@/components/DisconnectionAlert/DisconnectionAlert';
 import { TurnTransition } from '@/components/TurnTransition/TurnTransition';
+import { WaitingScreen } from '@/components/GameUI/WaitingScreen';
 
 interface ActiveGameProps {
   roomId: string;
@@ -32,6 +33,8 @@ interface ActiveGameProps {
   onLeaveGame?: () => void;
 }
 
+// CRITICAL FIX: Force check word options at the highest level of the component
+// This will ensure the dialog is ALWAYS shown when word options are available
 export function ActiveGame({ 
   roomId, 
   canvasRef,
@@ -144,11 +147,19 @@ export function ActiveGame({
   
   // Show word selector dialog when it's my turn and I have word options
   useEffect(() => {
+    console.log("Turn state:", { 
+      isMyTurn, 
+      status: game.status, 
+      wordOptions: game.wordOptions,
+      currentWord: game.currentWord 
+    });
+    
     if (isMyTurn && 
         game.status === 'waiting' && 
         game.wordOptions && 
         Array.isArray(game.wordOptions) && 
         game.wordOptions.length > 0) {
+      console.log("Showing word selector dialog");
       setShowWordSelector(true);
       setCanvasEnabled(false);
     } else {
@@ -156,6 +167,7 @@ export function ActiveGame({
       
       // Enable canvas if it's my turn and we're playing
       if (isMyTurn && game.status === 'playing') {
+        console.log("Enabling canvas for drawing");
         setCanvasEnabled(true);
         
         // Show turn notification
@@ -171,6 +183,52 @@ export function ActiveGame({
       }
     }
   }, [isMyTurn, game.status, game.wordOptions, setCanvasEnabled, game.currentWord, toast]);
+
+  // Enhanced debug logging to track state changes
+  useEffect(() => {
+    console.log("Game state changed:", { 
+      isMyTurn, 
+      status: game.status, 
+      wordOptions: game.wordOptions,
+      currentWord: game.currentWord,
+      currentDrawerId: game.currentDrawerId,
+      userId: user?.id
+    });
+    
+    if (isMyTurn && 
+        game.status === 'waiting' && 
+        game.wordOptions && 
+        Array.isArray(game.wordOptions) && 
+        game.wordOptions.length > 0) {
+      console.log("✅ Showing word selector dialog with options:", game.wordOptions);
+      setShowWordSelector(true);
+      setCanvasEnabled(false);
+    } else {
+      console.log("❌ Not showing word selector. Conditions:", { 
+        isMyTurn, 
+        status: game.status, 
+        hasWordOptions: Boolean(game.wordOptions && Array.isArray(game.wordOptions) && game.wordOptions.length > 0)
+      });
+      setShowWordSelector(false);
+      
+      // Enable canvas if it's my turn and we're playing
+      if (isMyTurn && game.status === 'playing') {
+        console.log("Enabling canvas for drawing");
+        setCanvasEnabled(true);
+        
+        // Show turn notification
+        setShowTurnNotification(true);
+        setTimeout(() => setShowTurnNotification(false), 3000);
+        
+        toast({
+          title: "Your turn!",
+          description: `It's your turn to draw "${game.currentWord}"`,
+        });
+      } else {
+        setCanvasEnabled(false);
+      }
+    }
+  }, [isMyTurn, game.status, game.wordOptions, setCanvasEnabled, game.currentWord, toast, user?.id, game.currentDrawerId]);
   
   // Set up periodic AI prediction when drawing
   useEffect(() => {
@@ -313,6 +371,183 @@ export function ActiveGame({
     await startGame(roomId);
   };
   
+  // Add new state to debug word selection display
+  const [wordSelectorDebugInfo, setWordSelectorDebugInfo] = useState<{
+    isMyTurn: boolean;
+    gameStatus: string;
+    hasOptions: boolean;
+    optionsCount: number;
+    currentDrawerId: string | null;
+    userId: string | null;
+  } | null>(null);
+  
+  // Show word selector dialog when it's my turn and I have word options
+  useEffect(() => {
+    // Gather debug info
+    const debugInfo = {
+      isMyTurn,
+      gameStatus: game.status,
+      hasOptions: !!game.wordOptions && Array.isArray(game.wordOptions),
+      optionsCount: game.wordOptions && Array.isArray(game.wordOptions) ? game.wordOptions.length : 0,
+      currentDrawerId: game.currentDrawerId,
+      userId: user?.id || null
+    };
+    
+    setWordSelectorDebugInfo(debugInfo);
+    
+    console.log("Word selection conditions:", {
+      isMyTurn,
+      gameStatus: game.status,
+      hasOptions: !!game.wordOptions && Array.isArray(game.wordOptions),
+      optionsCount: game.wordOptions && Array.isArray(game.wordOptions) ? game.wordOptions.length : 0,
+      wordOptions: game.wordOptions
+    });
+    
+    if (isMyTurn && 
+        game.status === 'waiting' && 
+        game.wordOptions && 
+        Array.isArray(game.wordOptions) && 
+        game.wordOptions.length > 0) {
+      console.log("✅ Showing word selector dialog with options:", game.wordOptions);
+      setShowWordSelector(true);
+      setCanvasEnabled(false);
+    } else {
+      console.log("❌ Not showing word selector");
+      setShowWordSelector(false);
+      
+      // Enable canvas if it's my turn and we're playing
+      if (isMyTurn && game.status === 'playing') {
+        setCanvasEnabled(true);
+        
+        // Show turn notification
+        setShowTurnNotification(true);
+        setTimeout(() => setShowTurnNotification(false), 3000);
+        
+        toast({
+          title: "Your turn!",
+          description: `It's your turn to draw "${game.currentWord}"`,
+        });
+      } else {
+        setCanvasEnabled(false);
+      }
+    }
+  }, [isMyTurn, game.status, game.wordOptions, setCanvasEnabled, game.currentWord, toast, user?.id, game.currentDrawerId]);
+  
+  // Show debugging info at the top of the component for issues with word selection
+  const renderDebuggingInfo = () => {
+    if (!wordSelectorDebugInfo) return null;
+    
+    return (
+      <div className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md text-xs">
+        <h3 className="font-bold mb-1">Word Selection Debug Info:</h3>
+        <ul className="list-disc pl-5">
+          <li>Is My Turn: {wordSelectorDebugInfo.isMyTurn ? '✅' : '❌'}</li>
+          <li>Game Status: {wordSelectorDebugInfo.gameStatus}</li>
+          <li>Has Word Options: {wordSelectorDebugInfo.hasOptions ? '✅' : '❌'}</li>
+          <li>Word Options Count: {wordSelectorDebugInfo.optionsCount}</li>
+          <li>Current Drawer ID: {wordSelectorDebugInfo.currentDrawerId}</li>
+          <li>My User ID: {wordSelectorDebugInfo.userId}</li>
+        </ul>
+      </div>
+    );
+  };
+  
+  // CRITICAL FIX: Add a direct renderer component for the word options 
+  // which will bypass any conditional rendering issues
+  useEffect(() => {
+    // Force show the word selector when options are available
+    if (isMyTurn && 
+        game.wordOptions && 
+        Array.isArray(game.wordOptions) && 
+        game.wordOptions.length > 0) {
+      // Create a direct DOM element to force the dialog to show
+      const existingEmergencyDialog = document.getElementById('emergency-word-dialog');
+      
+      if (!existingEmergencyDialog && document.body) {
+        console.log("⚠️ EMERGENCY: Directly creating word selection dialog");
+        
+        // Create container
+        const container = document.createElement('div');
+        container.id = 'emergency-word-dialog';
+        container.style.position = 'fixed';
+        container.style.top = '0';
+        container.style.left = '0';
+        container.style.width = '100%';
+        container.style.height = '100%';
+        container.style.display = 'flex';
+        container.style.alignItems = 'center';
+        container.style.justifyContent = 'center';
+        container.style.backgroundColor = 'rgba(0,0,0,0.75)';
+        container.style.zIndex = '9999';
+        
+        // Create dialog
+        const dialog = document.createElement('div');
+        dialog.style.backgroundColor = 'white';
+        dialog.style.borderRadius = '8px';
+        dialog.style.padding = '20px';
+        dialog.style.maxWidth = '400px';
+        dialog.style.width = '100%';
+        dialog.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.25)';
+        
+        // Create header
+        const header = document.createElement('h2');
+        header.textContent = 'Choose a Word to Draw';
+        header.style.fontSize = '20px';
+        header.style.fontWeight = 'bold';
+        header.style.marginBottom = '15px';
+        header.style.textAlign = 'center';
+        
+        dialog.appendChild(header);
+        
+        // Create options
+        game.wordOptions.forEach((word, index) => {
+          const button = document.createElement('button');
+          button.textContent = word;
+          button.style.display = 'block';
+          button.style.width = '100%';
+          button.style.marginBottom = '10px';
+          button.style.padding = '15px';
+          button.style.backgroundColor = '#f9fafb';
+          button.style.border = '1px solid #d1d5db';
+          button.style.borderRadius = '4px';
+          button.style.cursor = 'pointer';
+          button.style.fontSize = '16px';
+          button.style.textAlign = 'center';
+          
+          button.addEventListener('mouseover', () => {
+            button.style.backgroundColor = '#f3f4f6';
+            button.style.borderColor = '#6366f1';
+          });
+          
+          button.addEventListener('mouseout', () => {
+            button.style.backgroundColor = '#f9fafb';
+            button.style.borderColor = '#d1d5db';
+          });
+          
+          button.addEventListener('click', async () => {
+            try {
+              await selectWord(roomId, word);
+              document.body.removeChild(container);
+            } catch (error) {
+              console.error("Failed to select word:", error);
+            }
+          });
+          
+          dialog.appendChild(button);
+        });
+        
+        container.appendChild(dialog);
+        document.body.appendChild(container);
+      }
+    } else {
+      // Remove the emergency dialog when no longer needed
+      const existingEmergencyDialog = document.getElementById('emergency-word-dialog');
+      if (existingEmergencyDialog && document.body) {
+        document.body.removeChild(existingEmergencyDialog);
+      }
+    }
+  }, [isMyTurn, game.wordOptions, roomId, selectWord]);
+  
   // If game is finished, show game end screen
   if (game.status === 'finished') {
     return (
@@ -323,20 +558,107 @@ export function ActiveGame({
     );
   }
 
+  // IMPORTANT: Detect word options at the highest component level regardless of other state
+  const hasWordOptions = game.wordOptions && 
+                         Array.isArray(game.wordOptions) && 
+                         game.wordOptions.length > 0;
+
+  // CRITICAL FIX: If the user should be selecting a word, immediately return the dialog
+  // This has highest priority over all other rendering conditions
+  if (isMyTurn && hasWordOptions) {
+    console.log("🔴 Critical priority rendering of WordSelectionDialog with options:", game.wordOptions);
+    // Render directly without any wrapper component that might interfere
+    return <WordSelectionDialog 
+      open={true}
+      roomId={roomId}
+      words={game.wordOptions || []}
+      onSelectionComplete={() => setShowWordSelector(false)}
+    />;
+  }
+
   // If waiting for word selection  
-  if (showWordSelector && game.wordOptions && Array.isArray(game.wordOptions)) {
+  if (shouldShowWordSelector) {
+    console.log("Rendering WordSelectionDialog with options:", game.wordOptions);
     return (
-      <WordSelectionDialog 
-        open={showWordSelector}
-        roomId={roomId}
-        words={game.wordOptions}
-        onSelectionComplete={() => setShowWordSelector(false)}
-      />
+      <div>
+        {/* Include debug info at the top */}
+        {renderDebuggingInfo()}
+        
+        <WordSelectionDialog 
+          open={true}
+          roomId={roomId}
+          words={game.wordOptions || []} {/* Fix potential undefined error */}
+          onSelectionComplete={() => setShowWordSelector(false)}
+        />
+      </div>
     );
   }
 
+  // Render word selection dialog with high priority check
+  const shouldShowWordDialog = isMyTurn && 
+                           game.status === 'waiting' && 
+                           game.wordOptions && 
+                           Array.isArray(game.wordOptions) && 
+                           game.wordOptions.length > 0;
+
+// Debugging info to help identify the issue
+console.log("Word selection dialog conditions:", {
+  shouldShow: shouldShowWordDialog,
+  isMyTurn,
+  gameStatus: game.status,
+  hasWordOptions, // Use the existing hasWordOptions variable
+  wordOptionsCount: game.wordOptions?.length || 0,
+  currentDrawerId: game.currentDrawerId,
+  myUserId: user?.id
+});
+
+// CRITICAL: First priority check - if user has word options and it's their turn, ALWAYS show selector
+if (isMyTurn && hasWordOptions) {
+  console.log("⭐ Forcing word selection dialog with options:", game.wordOptions);
+  return (
+    <div className="w-full">
+      <WordSelectionDialog 
+        open={true}
+        roomId={roomId}
+        // Fix the Type 'string[] | undefined' error by using non-null assertion or providing empty array fallback
+        words={game.wordOptions || []}
+        onSelectionComplete={() => setShowWordSelector(false)}
+      />
+    </div>
+  );
+}
+
+// Second priority check - this is a fallback
+if (shouldShowWordDialog) {
+  console.log("Rendering word selection dialog...");
+  return (
+    <div className="w-full">
+      <WordSelectionDialog 
+        open={true}
+        roomId={roomId}
+        words={Array.isArray(game.wordOptions) ? game.wordOptions : []}
+        onSelectionComplete={() => {
+          console.log("Word selected, hiding dialog");
+          setShowWordSelector(false);
+        }}
+      />
+    </div>
+  );
+}
+
+// If waiting for another player to choose/draw
+if (game.status === 'waiting' && !isMyTurn) {
+  const currentDrawer = game.players.find(p => p.userId === game.currentDrawerId);
+  return (
+    <WaitingScreen currentPlayerName={currentDrawer?.username} />
+  );
+}
+
   return (
     <div className="game-ui flex flex-col gap-4 w-full">
+      {/* Include debug info at the top */}
+      {renderDebuggingInfo()}
+      
       {/* Turn Transition */}
       {showTurnTransition && (
         <TurnTransition 
