@@ -69,16 +69,39 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const { socket, isConnected } = useSocket();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [game, setGame] = useState<GameState>(defaultGameState);
   const [timeRemaining, setTimeRemaining] = useState<number>(60);
   const [countdown, setCountdown] = useState<NodeJS.Timeout | null>(null);
   const [predictionThrottleTimeout, setPredictionThrottleTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // Derived states
   const isInGame = game.status === 'playing' || game.status === 'round_end';
   const isMyTurn = !!user && !!game.currentDrawerId && user.id === game.currentDrawerId;
+  
+  // Set initialized state once auth is loaded
+  useEffect(() => {
+    if (!authLoading) {
+      // Small delay to ensure all state is properly initialized
+      const timer = setTimeout(() => {
+        setIsInitialized(true);
+      }, 300);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [authLoading]);
+  
+  // Clear any stale word options on initial load
+  useEffect(() => {
+    if (isInitialized && !isInGame) {
+      setGame(prev => ({
+        ...prev,
+        wordOptions: []
+      }));
+    }
+  }, [isInitialized, isInGame]);
   
   // Reset game countdown when round ends
   useEffect(() => {
@@ -95,6 +118,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
     // Game initialization event
     const handleGameInitialized = (data: any) => {
       console.log("Game initialized event received:", data);
+      
+      // Mark game as started in localStorage
+      if (data.gameId) {
+        localStorage.setItem(`game_started_${data.gameId}`, 'true');
+      }
       
       // Only show the "waiting for host" toast if the current user is not the host
       const isCurrentUserHost = user && user.id === data.hostId;
@@ -119,6 +147,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     // Game start event
     const handleGameStarted = (data: any) => {
+      const roomId = data.roomId || game.gameId;
+      
+      // Save game started state to localStorage
+      if (roomId) {
+        localStorage.setItem(`game_started_${roomId}`, 'true');
+      }
+      
       setGame(prev => ({
         ...prev,
         status: 'playing',
@@ -361,6 +396,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
     
     // Game state update (for reconnecting players)
     const handleGameState = (data: any) => {
+      // If we're getting a game state update, the game is in progress
+      // Mark it as started in localStorage
+      if (data.gameId) {
+        localStorage.setItem(`game_started_${data.gameId}`, 'true');
+      }
+      
       setGame({
         gameId: data.gameId,
         status: data.status,
@@ -426,20 +467,49 @@ export function GameProvider({ children }: { children: ReactNode }) {
     };
   }, [socket, isConnected, toast, user, countdown]);
 
+  // Check for game in progress on initial load
+  useEffect(() => {
+    // After authentication is loaded, check if there's a saved game state
+    if (!authLoading && user && socket && isConnected) {
+      const roomId = localStorage.getItem('currentRoomId');
+      const wasInGame = roomId && localStorage.getItem(`game_started_${roomId}`) === 'true';
+      
+      if (wasInGame && roomId) {
+        console.log("Found saved game state, attempting to reconnect");
+        
+        // Request latest game state
+        socket.emit('get_game_state', { roomId }, (response: any) => {
+          if (response.success && response.isActive) {
+            console.log("Successfully reconnected to active game");
+            // Game state will be updated via the game:state event
+          }
+        });
+      }
+    }
+  }, [authLoading, user, socket, isConnected]);
+
   // Helper function to start the countdown timer
   const startCountdownTimer = (seconds: number) => {
+    console.log(`Starting countdown timer with ${seconds} seconds`);
+    
     // Clear any existing timer
     if (countdown) {
       clearInterval(countdown);
+      setCountdown(null);
     }
     
+    // Set initial time remaining
     setTimeRemaining(seconds);
     
     // Set up new timer
     const timer = setInterval(() => {
       setTimeRemaining(prevTime => {
+        // Debug output
+        console.log(`Timer tick: ${prevTime} seconds remaining`);
+        
         if (prevTime <= 1) {
           clearInterval(timer);
+          console.log("Timer reached zero, clearing interval");
           return 0;
         }
         return prevTime - 1;
@@ -447,9 +517,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }, 1000);
     
     setCountdown(timer);
-    
-    return () => clearInterval(timer);
   };
+
+  // Update the countdown timer with auto-next-turn functionality
+  useEffect(() => {
+    // If game is playing and time reaches zero, automatically go to next turn
+    if (game.status === 'playing' && timeRemaining === 0 && isMyTurn) {
+      console.log("Timer reached zero - automatically requesting next turn");
+      if (game.gameId) {
+        requestNextTurn(game.gameId);
+      }
+    }
+  }, [timeRemaining, game.status, isMyTurn, game.gameId]);
 
   // Function to start game (host only)
   const startGame = async (roomId: string): Promise<boolean> => {
@@ -473,7 +552,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
         console.log("Game initialize response:", response);
         
         if (response.success) {
-          // Always update the game state with the response data
+          // Mark that the game has started in localStorage
+          localStorage.setItem(`game_started_${roomId}`, 'true');
+          
+          // Update game state
           setGame(prev => ({
             ...prev,
             gameId: response.gameId,
@@ -508,30 +590,53 @@ export function GameProvider({ children }: { children: ReactNode }) {
       
       console.log(`Selecting word: "${word}" for room: ${roomId}`);
       
-      socket.emit('game:selectWord', { roomId, word }, (response: any) => {
-        console.log("Word selection response:", response);
-        
-        if (response.success) {
-          // IMPORTANT: Clear word options immediately to ensure dialog disappears
-          setGame(prev => ({
-            ...prev,
-            currentWord: word,
-            wordOptions: [], // Clear word options to hide the dialog
-            status: 'playing'
-          }));
+      // IMPORTANT: Update local game state immediately to enable canvas
+      // Set status to 'playing' immediately for better responsiveness
+      setGame(prev => ({
+        ...prev,
+        wordOptions: [], // Clear immediately so dialog starts closing
+        currentWord: word, // Set the word immediately
+        status: 'playing'  // Set status to playing immediately
+      }));
+      
+      console.log("Starting timer immediately after word selection");
+      
+      // Start timer immediately when word is selected (60 seconds)
+      startCountdownTimer(60);
+      
+      // Add a small delay to ensure UI updates
+      setTimeout(() => {
+        socket.emit('game:selectWord', { roomId, word }, (response: any) => {
+          console.log("Word selection response:", response);
           
-          console.log(`Word selected successfully: ${word}`);
-          resolve(true);
-        } else {
-          console.error("Failed to select word:", response.error);
-          toast({
-            title: "Error",
-            description: response.error || "Failed to select word",
-            variant: "destructive"
-          });
-          resolve(false);
-        }
-      });
+          if (response.success) {
+            // Game status should already be 'playing', but ensure it remains so
+            setGame(prev => ({
+              ...prev,
+              currentWord: word,
+              status: 'playing'
+            }));
+            
+            console.log(`Word selected successfully: ${word}`);
+            resolve(true);
+          } else {
+            console.error("Failed to select word:", response.error);
+            
+            // If the request failed, reset the timer
+            if (countdown) {
+              clearInterval(countdown);
+              setCountdown(null);
+            }
+            
+            toast({
+              title: "Error",
+              description: response.error || "Failed to select word",
+              variant: "destructive"
+            });
+            resolve(false);
+          }
+        });
+      }, 50);
     });
   };
 
@@ -603,6 +708,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
         return;
       }
       
+      // Reset the timer
+      if (countdown) {
+        clearInterval(countdown);
+        setCountdown(null);
+      }
+      
       socket.emit('game:nextTurn', { roomId }, (response: any) => {
         resolve(response.success);
       });
@@ -619,6 +730,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       
       socket.emit('game:end', { roomId }, (response: any) => {
         if (response.success) {
+          // Clear game started flag when game ends
+          localStorage.removeItem(`game_started_${roomId}`);
           setGame(defaultGameState);
           resolve(true);
         } else {

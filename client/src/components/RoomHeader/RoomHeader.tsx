@@ -127,6 +127,25 @@ export function RoomHeader({
     }
   };
   
+  // Store game started state in localStorage to persist across reloads
+  useEffect(() => {
+    if (isInGame) {
+      localStorage.setItem(`game_started_${roomId}`, 'true');
+    }
+  }, [isInGame, roomId]);
+  
+  // Check if game was previously started (to keep button hidden after reload)
+  const [gameStarted, setGameStarted] = useState(() => {
+    return isInGame || localStorage.getItem(`game_started_${roomId}`) === 'true';
+  });
+  
+  // Update gameStarted state whenever isInGame changes
+  useEffect(() => {
+    if (isInGame) {
+      setGameStarted(true);
+    }
+  }, [isInGame]);
+
   return (
     <motion.div 
       className="bg-card shadow-sm border rounded-lg p-4 mb-4 w-full"
@@ -224,7 +243,7 @@ export function RoomHeader({
           )}
           
           {/* Start Game button - only shown to host when not in game */}
-          {isHost && !isInGame && (
+          {isHost && !gameStarted && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>

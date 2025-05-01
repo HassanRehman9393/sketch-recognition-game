@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { 
   FaPaintBrush, FaEraser, FaUndo, FaRedo, 
-  FaTrash, FaSave, FaPalette
+  FaTrash, FaSave, FaPalette, FaClock
 } from "react-icons/fa";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -26,6 +26,8 @@ import { RoomSelector } from "@/components/RoomSelector/RoomSelector";
 import { useToast } from "@/components/ui/use-toast";
 import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
 import { ActiveGame } from '@/components/GameUI/ActiveGame';
+import { DrawingTimer } from '@/components/GameUI/DrawingTimer';
+import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
 
 
 interface Point {
@@ -60,7 +62,7 @@ const Canvas = () => {
   const [isCanvasEnabled, setIsCanvasEnabled] = useState(false);
   const { user } = useAuth();
   const { socket, isConnected } = useSocket();
-  const { isInGame } = useGame();
+  const { isInGame, game, isMyTurn, timeRemaining } = useGame();
   const { leaveRoom } = useRooms();
   const { toast } = useToast();
   
@@ -133,11 +135,14 @@ const Canvas = () => {
             }));
           }
           
-          // Show warning if game is in progress (should only happen during reconnect)
+          // IMPORTANT: Check if game is already in progress and mark as started
           if (response.gameInProgress) {
+            console.log("Joining a game in progress, marking as started");
+            localStorage.setItem(`game_started_${roomId}`, 'true');
+            
             toast({
               title: 'Game in Progress',
-              description: 'You are rejoining an active game',
+              description: 'You are joining an active game',
               duration: 3000
             });
           }
@@ -364,6 +369,31 @@ const Canvas = () => {
     };
   }, [canvasState]);
 
+  // Track canvas enablement visually
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    if (isCanvasEnabled) {
+      console.log("Canvas is now enabled for drawing");
+      canvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+      // Add a subtle indicator that canvas is enabled
+      canvas.classList.add('border-primary');
+      canvas.classList.add('border-2');
+      
+      // Set tabIndex to make canvas focusable
+      canvas.tabIndex = 0;
+      
+      // Focus the canvas to enable immediate interaction
+      canvas.focus();
+    } else {
+      console.log("Canvas is now disabled");
+      canvas.style.cursor = 'not-allowed';
+      canvas.classList.remove('border-primary');
+      canvas.classList.remove('border-2');
+    }
+  }, [isCanvasEnabled, tool]);
+
   // Handle mouse/touch events with socket integration
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (!roomId || !socket || !isCanvasEnabled) return;
@@ -580,6 +610,9 @@ const Canvas = () => {
   };
   
   const handleLeaveRoom = () => {
+    // Clear game started flag when leaving the room
+    localStorage.removeItem(`game_started_${roomId}`);
+    
     leaveRoom();
     setRoomId(null);
     setCanvasState({ lines: [], currentLine: null });
@@ -594,8 +627,10 @@ const Canvas = () => {
     });
   };
 
-  // Add handler for when the game is left
   const handleLeaveGame = () => {
+    // Clear game started flag when leaving the game
+    localStorage.removeItem(`game_started_${roomId}`);
+    
     leaveRoom();
     setRoomId(null);
     setCanvasState({ lines: [], currentLine: null });
@@ -610,6 +645,29 @@ const Canvas = () => {
     });
   };
   
+  // Update the ViewerTimer component for better visibility
+  const ViewerTimer = () => {
+    const isUrgent = timeRemaining <= 10;
+    
+    // Always show timer during gameplay, regardless of other conditions
+    const shouldShowTimer = game.status === 'playing' && game.currentWord;
+    
+    if (!shouldShowTimer) return null;
+    
+    return (
+      <div className={`
+        absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full
+        shadow-md backdrop-blur-sm transition-all z-50
+        ${isUrgent ? 'bg-red-600/80 text-white' : 'bg-white/80 text-gray-800 dark:bg-gray-800/80 dark:text-white'}
+      `}>
+        <FaClock className={isUrgent ? 'text-white animate-pulse' : 'text-primary'} />
+        <span className="font-mono font-medium">
+          {timeRemaining}s
+        </span>
+      </div>
+    );
+  };
+
   // If we don't have a roomId, show room selector
   if (!roomId) {
     return (
@@ -663,7 +721,9 @@ const Canvas = () => {
         <div className="flex flex-col md:flex-row gap-4 h-full min-h-[70vh]">
           {/* Toolbar - Vertical on desktop, horizontal on mobile */}
           <motion.div 
-            className="flex md:flex-col gap-2 p-2 bg-background border rounded-lg shadow-sm order-2 md:order-1"
+            className={`flex md:flex-col gap-2 p-2 bg-background border rounded-lg shadow-sm order-2 md:order-1 ${
+              isCanvasEnabled ? 'border-primary/50' : ''
+            }`}
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
@@ -676,12 +736,13 @@ const Canvas = () => {
                     variant={tool === 'brush' ? 'default' : 'outline'}
                     onClick={() => setTool('brush')}
                     disabled={!isCanvasEnabled}
+                    className={isCanvasEnabled ? 'hover:bg-primary/90' : ''}
                   >
                     <FaPaintBrush />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  <p>Brush Tool</p>
+                  <p>Brush Tool {!isCanvasEnabled && '(Disabled)'}</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -819,11 +880,23 @@ const Canvas = () => {
 
           {/* Canvas Container */}
           <motion.div 
-            className="flex-1 border rounded-lg shadow-md overflow-hidden bg-white order-1 md:order-2 min-h-[70vh]"
+            className="flex-1 border rounded-lg shadow-md overflow-hidden bg-white order-1 md:order-2 min-h-[70vh] relative"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3 }}
           >
+            {/* Keep only this timer in the canvas */}
+            {game.status === 'playing' && game.currentWord && (
+              <div className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full
+                             shadow-md backdrop-blur-sm bg-white/90 dark:bg-gray-800/90">
+                <FaClock className={timeRemaining <= 10 ? "text-red-500 animate-pulse" : "text-primary"} />
+                <span className="font-mono font-semibold">{timeRemaining}s</span>
+              </div>
+            )}
+            
+            {/* Display current drawer name for non-drawing players */}
+            <CurrentDrawerDisplay isVisible={game.status === 'playing' && !isMyTurn} />
+            
             <canvas
               ref={canvasRef}
               className="w-full h-full touch-none"

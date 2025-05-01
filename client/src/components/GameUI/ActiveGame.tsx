@@ -3,6 +3,9 @@ import { useGame } from '@/contexts/GameContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { WaitingScreen } from '@/components/GameUI/WaitingScreen';
 import { WordSelectionDialog } from '@/components/WordSelectionDialog/WordSelectionDialog';
+import { DrawingTimer } from '@/components/GameUI/DrawingTimer';
+import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
+import { FaClock } from 'react-icons/fa'; // Import for the FaClock icon
 
 interface ActiveGameProps {
   roomId: string;
@@ -22,10 +25,10 @@ export function ActiveGame({
   onLeaveGame
 }: ActiveGameProps) {
   const { user } = useAuth();
-  const { game, isMyTurn } = useGame();
+  const { game, isMyTurn, timeRemaining } = useGame(); // Add timeRemaining here
   const [showWordSelector, setShowWordSelector] = useState(false);
   
-  // Track when word selection should be shown
+  // Track when word selection should be shown and when canvas should be enabled
   useEffect(() => {
     const hasWordOptions = Boolean(
       game.wordOptions && 
@@ -33,51 +36,71 @@ export function ActiveGame({
       game.wordOptions.length > 0
     );
     
-    console.log("ActiveGame - checking for word selection conditions:", {
+    console.log("ActiveGame - checking for word selection and canvas conditions:", {
       isMyTurn,
       status: game.status,
-      hasWordOptions,
+      hasOptions: hasWordOptions,
       wordOptionsCount: game.wordOptions?.length || 0,
       currentDrawerId: game.currentDrawerId,
-      myUserId: user?.id
+      myUserId: user?.id,
+      currentWord: game.currentWord
     });
     
-    // Enable/disable canvas based on game state
-    if (isMyTurn) {
-      if (hasWordOptions) {
-        console.log("ActiveGame - Word selection needed, showing selector and disabling canvas");
-        setShowWordSelector(true);
-        setCanvasEnabled(false);
-      } else if (game.status === 'playing') {
-        console.log("ActiveGame - Word selected, enabling canvas for drawing");
-        setShowWordSelector(false);
-        setCanvasEnabled(true);
-      }
-    } else {
-      // Not our turn, can't draw
+    // CRITICAL: Enable canvas immediately when it's the user's turn
+    // Note: Check for both 'playing' status AND when user has a currentWord but game state is lagging
+    if (isMyTurn && (game.status === 'playing' || game.currentWord)) {
+      console.log("ActiveGame - Enabling canvas for drawing immediately based on turn/word/status");
+      setShowWordSelector(false);
+      setCanvasEnabled(true);
+      
+      // Ensure the canvas gets focus
+      setTimeout(() => {
+        if (canvasRef.current) {
+          canvasRef.current.focus();
+        }
+      }, 100);
+    } 
+    // Show word selector when needed
+    else if (isMyTurn && hasWordOptions) {
+      console.log("ActiveGame - Word selection needed, showing selector and disabling canvas");
+      setShowWordSelector(true);
+      setCanvasEnabled(false);
+    } 
+    // Disable canvas for non-drawer players
+    else {
+      console.log("ActiveGame - Not drawer's turn, disabling canvas");
       setShowWordSelector(false);
       setCanvasEnabled(false);
     }
-  }, [isMyTurn, game.status, game.wordOptions, game.currentDrawerId, user?.id, setCanvasEnabled]);
+  }, [isMyTurn, game.status, game.wordOptions, game.currentDrawerId, game.currentWord, user?.id, canvasRef]);
   
-  // Handle completion of word selection
+  // Handle completion of word selection - immediately enable canvas
   const handleWordSelectionComplete = () => {
-    console.log("Word selection completed in ActiveGame - enabling canvas immediately");
+    console.log("Word selection completed in ActiveGame - enabling canvas IMMEDIATELY");
     setShowWordSelector(false);
     
-    // Check if playing state is already set (might be set by selectWord already)
-    if (game.status === 'playing' && isMyTurn) {
-      setCanvasEnabled(true);
-    }
+    // Force canvas to be enabled right away
+    setCanvasEnabled(true);
     
-    // Set a short timeout as a fallback to make sure canvas gets enabled
-    // This helps if the game state update hasn't propagated yet
+    // Double ensure canvas is enabled with a small delay in case of React batching
     setTimeout(() => {
-      if (isMyTurn) {
-        console.log("Fallback canvas enablement after word selection");
-        setCanvasEnabled(true);
+      setCanvasEnabled(true);
+      
+      // Also focus the canvas
+      if (canvasRef.current) {
+        canvasRef.current.focus();
       }
-    }, 500);
+      
+      // Force a redraw of the canvas to ensure it's properly initialized
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          // Force a redraw by triggering a small change and then reverting it
+          ctx.lineWidth += 0.1;
+          ctx.lineWidth -= 0.1;
+        }
+      }
+    }, 50);
   };
   
   // Check if we should display word options
@@ -109,13 +132,7 @@ export function ActiveGame({
   // Default placeholder UI for game in progress
   return (
     <div className="flex flex-col gap-4 w-full">
-      <div className="p-4 bg-background border rounded-lg">
-        <h2 className="text-xl font-bold mb-2">Game in Progress</h2>
-        <p>Status: {game.status}</p>
-        <p>Current Round: {game.currentRound} of {game.totalRounds}</p>
-        <p>Players: {game.players.length}</p>
-        <p>Your turn: {isMyTurn ? 'Yes' : 'No'}</p>
-      </div>
+      {/* Remove the timer from here as it's already shown in the canvas */}
     </div>
   );
 }

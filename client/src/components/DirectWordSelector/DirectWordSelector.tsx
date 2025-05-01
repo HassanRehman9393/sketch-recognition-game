@@ -7,14 +7,27 @@ import { WordSelectionDialog } from '@/components/WordSelectionDialog/WordSelect
 // This component will be mounted at the application root level to catch all word selection events
 export function DirectWordSelector() {
   const { game, isMyTurn } = useGame();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const [showDialog, setShowDialog] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   
   const hasWordOptions = Boolean(
     game.wordOptions && 
     Array.isArray(game.wordOptions) && 
     game.wordOptions.length > 0
   );
+  
+  // Set initialLoadComplete after auth loading is done
+  useEffect(() => {
+    if (!isLoading) {
+      // Set a slight delay to ensure all state is properly loaded
+      const timer = setTimeout(() => {
+        setInitialLoadComplete(true);
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
   
   // Create root portal element if needed
   useEffect(() => {
@@ -32,17 +45,23 @@ export function DirectWordSelector() {
     };
   }, []);
 
-  // Display dialog when conditions are met
+  // Display dialog when conditions are met - but only after initial load is complete
   useEffect(() => {
-    const shouldShowDialog = isMyTurn && hasWordOptions;
+    if (!initialLoadComplete) return;
+    
+    // We only want to show word selection if we're in waiting status and there are word options
+    const shouldShowDialog = isMyTurn && 
+                             hasWordOptions && 
+                             game.status === 'waiting' &&
+                             !game.currentWord; // Add this check to prevent dialog after word selection
     
     console.log("DirectWordSelector - checking conditions:", {
+      initialLoadComplete,
       isMyTurn,
       status: game.status,
       hasWordOptions,
+      currentWord: !!game.currentWord,
       shouldShowDialog,
-      currentDrawerId: game.currentDrawerId,
-      myUserId: user?.id
     });
     
     if (shouldShowDialog) {
@@ -50,15 +69,15 @@ export function DirectWordSelector() {
     } else {
       setShowDialog(false);
     }
-  }, [isMyTurn, hasWordOptions, game.currentDrawerId, user?.id, game.status]);
+  }, [isMyTurn, hasWordOptions, game.status, game.currentWord, initialLoadComplete]);
   
   const handleDialogClose = () => {
     console.log("Word selection dialog closed");
     setShowDialog(false);
   };
   
-  // Only render when needed
-  if (!showDialog) {
+  // Only render when needed and after initial load is complete
+  if (!showDialog || !initialLoadComplete) {
     return null;
   }
   

@@ -28,21 +28,28 @@ export function WordSelectionDialog({
   const closeDialog = useCallback(() => {
     console.log("Closing dialog immediately");
     setIsVisible(false);
-    // Call the completion handler immediately to avoid any delay
+    
+    // Call completion handler immediately - this is critical to enable canvas right away
     onSelectionComplete();
+    
+    // Remove any lingering dialogs
+    const emergencyDialog = document.getElementById('emergency-word-dialog');
+    if (emergencyDialog && document.body.contains(emergencyDialog)) {
+      document.body.removeChild(emergencyDialog);
+    }
   }, [onSelectionComplete]);
   
   useEffect(() => {
     console.log("WordSelectionDialog mounted with words:", words);
     
-    // Clean up any existing emergency dialogs
-    const emergencyDialog = document.getElementById('emergency-word-dialog');
-    if (emergencyDialog && document.body.contains(emergencyDialog)) {
-      document.body.removeChild(emergencyDialog);
-    }
-    
+    // Ensure dialog is removed on component unmount
     return () => {
       console.log("WordSelectionDialog unmounting");
+      // Remove any emergency dialogs that might be present
+      const emergencyDialog = document.getElementById('emergency-word-dialog');
+      if (emergencyDialog && document.body.contains(emergencyDialog)) {
+        document.body.removeChild(emergencyDialog);
+      }
     };
   }, []);
 
@@ -60,17 +67,6 @@ export function WordSelectionDialog({
     return () => clearInterval(timer);
   }, [open]);
   
-  // Failsafe: If selection is stuck for too long, force close the dialog (reduce to 5 seconds)
-  useEffect(() => {
-    if (isSelecting) {
-      const timeout = setTimeout(() => {
-        console.log("Selection taking too long, forcing dialog closure");
-        closeDialog();
-      }, 5000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isSelecting, closeDialog]);
-  
   const handleWordSelect = async (word: string, index: number) => {
     if (isSelecting) return;
     
@@ -80,18 +76,29 @@ export function WordSelectionDialog({
     try {
       console.log(`Selecting word: "${word}"`);
       
-      // IMPORTANT: Close the dialog immediately to provide better feedback
+      // CRITICAL: Close dialog immediately before API call to ensure immediate UI feedback
       closeDialog();
       
       // Then perform the actual selection
       const success = await selectWord(roomId, word);
       
-      if (!success) {
-        console.error("Failed to select word");
-        // Since we already closed the dialog, we just need to log the error
+      // This executes after selectWord completes
+      if (success) {
+        console.log("Word selection successful - canvas should now be enabled");
+        
+        // Extra forced callback to ensure parent components update
+        onSelectionComplete();
+      } else {
+        console.error("Failed to select word, but will still try to enable canvas");
+        
+        // Even if word selection fails, try to enable canvas as a fallback
+        onSelectionComplete();
       }
     } catch (error) {
       console.error("Error selecting word:", error);
+      
+      // Even on error, try to enable canvas as a fallback
+      onSelectionComplete();
     }
   };
 
