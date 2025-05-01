@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider } from './components/ui/theme-provider';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
-import { GameProvider } from './contexts/GameContext'; // Add GameProvider import
+import { GameProvider } from './contexts/GameContext';
 import AuthGuard from './components/AuthGuard';
 import Layout from './components/Layout/Layout';
 import Home from './pages/Home';
@@ -11,6 +11,7 @@ import Register from './pages/Register';
 import Canvas from './pages/Canvas';
 import HowToPlay from './pages/HowToPlay';
 import { Toaster } from './components/ui/toaster';
+import { DirectWordSelector } from './components/DirectWordSelector/DirectWordSelector';
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
       <Router>
         <AuthProvider>
           <SocketProvider>
-            <GameProvider> {/* Add GameProvider here */}
+            <GameProvider>
               <Layout>
                 <Routes>
                   <Route path="/" element={<Home />} />
@@ -36,6 +37,7 @@ function App() {
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>
+              <DirectWordSelector />
               <Toaster />
             </GameProvider>
           </SocketProvider>

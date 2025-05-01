@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useGame } from '@/contexts/GameContext';
 import { FaPencilAlt, FaSpinner } from 'react-icons/fa';
 import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
 
 interface WordSelectionDialogProps {
   open: boolean;
@@ -21,10 +22,29 @@ export function WordSelectionDialog({
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedWordIndex, setSelectedWordIndex] = useState<number | null>(null);
   const [selectionTimer, setSelectionTimer] = useState(100);
+  const [isVisible, setIsVisible] = useState(true);
+  
+  // Function to handle dialog closure with animation
+  const closeDialog = useCallback(() => {
+    console.log("Closing dialog immediately");
+    setIsVisible(false);
+    // Call the completion handler immediately to avoid any delay
+    onSelectionComplete();
+  }, [onSelectionComplete]);
   
   useEffect(() => {
     console.log("WordSelectionDialog mounted with words:", words);
-  }, [words]);
+    
+    // Clean up any existing emergency dialogs
+    const emergencyDialog = document.getElementById('emergency-word-dialog');
+    if (emergencyDialog && document.body.contains(emergencyDialog)) {
+      document.body.removeChild(emergencyDialog);
+    }
+    
+    return () => {
+      console.log("WordSelectionDialog unmounting");
+    };
+  }, []);
 
   // Add a gentle selection countdown timer to encourage quick decision
   useEffect(() => {
@@ -40,6 +60,17 @@ export function WordSelectionDialog({
     return () => clearInterval(timer);
   }, [open]);
   
+  // Failsafe: If selection is stuck for too long, force close the dialog (reduce to 5 seconds)
+  useEffect(() => {
+    if (isSelecting) {
+      const timeout = setTimeout(() => {
+        console.log("Selection taking too long, forcing dialog closure");
+        closeDialog();
+      }, 5000);
+      return () => clearTimeout(timeout);
+    }
+  }, [isSelecting, closeDialog]);
+  
   const handleWordSelect = async (word: string, index: number) => {
     if (isSelecting) return;
     
@@ -48,78 +79,97 @@ export function WordSelectionDialog({
     
     try {
       console.log(`Selecting word: "${word}"`);
+      
+      // IMPORTANT: Close the dialog immediately to provide better feedback
+      closeDialog();
+      
+      // Then perform the actual selection
       const success = await selectWord(roomId, word);
       
-      if (success) {
-        console.log("Word selection successful");
-        onSelectionComplete();
-      } else {
+      if (!success) {
         console.error("Failed to select word");
-        setSelectedWordIndex(null);
+        // Since we already closed the dialog, we just need to log the error
       }
     } catch (error) {
       console.error("Error selecting word:", error);
-    } finally {
-      setIsSelecting(false);
     }
   };
 
-  // Make sure the dialog stays visible and matches the app theme
+  if (!isVisible) {
+    return null;
+  }
+
   return (
-    <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-md overflow-hidden">
-        <div className="p-6">
-          <div className="flex items-center justify-center mb-4">
-            <div className="p-3 rounded-full bg-primary/10 text-primary">
-              <FaPencilAlt className="h-6 w-6" />
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md"
+      data-testid="word-selection-dialog"
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="w-full max-w-md mx-4 bg-card text-card-foreground border shadow-lg rounded-lg overflow-hidden"
+      >
+        <div className="p-6 space-y-4">
+          {/* Icon Header */}
+          <div className="flex justify-center">
+            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <FaPencilAlt className="h-5 w-5 text-primary" />
             </div>
           </div>
-          
-          <h2 className="text-xl font-bold text-center mb-2">Choose a Word to Draw</h2>
-          <p className="text-muted-foreground text-center mb-4">
-            Select one of these words to draw. Other players will try to guess what you're drawing.
-          </p>
+
+          {/* Title and Description */}
+          <div className="space-y-2 text-center">
+            <h3 className="text-xl font-semibold tracking-tight">Choose a Word to Draw</h3>
+            <p className="text-sm text-muted-foreground">
+              Select one of these words to draw. Other players will try to guess what you're drawing.
+            </p>
+          </div>
           
           {/* Countdown timer */}
-          <div className="mt-2 mb-6">
+          <div className="w-full">
             <Progress value={selectionTimer} className="h-1" />
           </div>
           
-          <div className="grid gap-3">
-            {words.map((word, i) => (
-              <motion.div
+          {/* Word options */}
+          <div className="space-y-2">
+            {words && words.map((word, i) => (
+              <Button
                 key={word || `word-${i}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1 }}
+                variant={selectedWordIndex === i ? "default" : "outline"}
+                className={`w-full py-6 text-lg ${
+                  selectedWordIndex === i ? 'bg-primary text-primary-foreground' : ''
+                } ${isSelecting && selectedWordIndex !== i ? 'opacity-50' : ''}`}
+                onClick={() => handleWordSelect(word, i)}
+                disabled={isSelecting}
+                data-testid={`word-option-${i}`}
               >
-                <button
-                  className={`w-full p-4 text-center rounded-md border transition-all duration-200 
-                    hover:bg-primary/5 hover:border-primary/40 active:scale-[0.98] text-lg font-medium
-                    ${selectedWordIndex === i 
-                      ? 'border-primary bg-primary/10 shadow-md' 
-                      : 'border-border hover:shadow'}`}
-                  onClick={() => handleWordSelect(word, i)}
-                  disabled={isSelecting}
-                >
-                  {word}
-                </button>
-              </motion.div>
+                {selectedWordIndex === i && isSelecting ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <FaSpinner className="h-4 w-4 animate-spin" />
+                    <span>Selecting...</span>
+                  </div>
+                ) : (
+                  word
+                )}
+              </Button>
             ))}
           </div>
           
-          <div className="mt-6 text-center text-sm text-muted-foreground">
+          {/* Status message */}
+          <div className="text-center text-sm text-muted-foreground pt-2">
             {isSelecting ? (
               <div className="flex items-center justify-center gap-2">
                 <FaSpinner className="h-4 w-4 animate-spin" />
-                <span>Preparing your canvas...</span>
+                <span>Getting your canvas ready...</span>
               </div>
             ) : (
               <span>Choose carefully - everyone will try to guess this!</span>
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

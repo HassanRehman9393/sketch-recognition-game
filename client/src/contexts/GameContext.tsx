@@ -154,7 +154,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
     };
     
-    // Word selection options - make sure this handler properly updates the game state
+    // Word selection options handler - just update state, don't render anything
     const handleSelectWord = (data: any) => {
       console.log("Word selection options received:", data);
       
@@ -168,11 +168,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
             currentRound: data.currentRound,
             totalRounds: data.totalRounds,
             hasSubmitted: false,
-            currentDrawerId: user?.id || null // Fix type error by providing null as fallback
+            currentDrawerId: user?.id || null
           };
         });
         
-        // Force a clear toast message about what to do next
         toast({
           title: "Your Turn!",
           description: "Choose a word to draw from the options",
@@ -474,26 +473,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
         console.log("Game initialize response:", response);
         
         if (response.success) {
-          // Check if the response contains word options
-          if (response.wordOptions && Array.isArray(response.wordOptions) && response.wordOptions.length > 0) {
-            console.log("Word options received, updating game state:", response.wordOptions);
-            
-            // Update the game state with the word options
-            setGame(prev => ({
-              ...prev,
-              gameId: response.gameId,
-              wordOptions: response.wordOptions,
-              status: 'waiting',
-              currentDrawerId: user?.id || null,
-            }));
-            
-            toast({
-              title: "Your Turn to Draw",
-              description: "Select one of the words to draw",
-              duration: 8000,
-            });
-          }
+          // Always update the game state with the response data
+          setGame(prev => ({
+            ...prev,
+            gameId: response.gameId,
+            wordOptions: response.wordOptions || [],
+            status: 'waiting',
+            currentDrawerId: response.currentDrawerId || user?.id || null,
+          }));
           
+          console.log(`Game initialized successfully, drawer ID: ${response.currentDrawerId}, current user ID: ${user?.id}`);
           resolve(true);
         } else {
           console.error("Failed to initialize game:", response.error);
@@ -523,20 +512,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
         console.log("Word selection response:", response);
         
         if (response.success) {
-          // Update game state to show we're now playing with the selected word
+          // IMPORTANT: Clear word options immediately to ensure dialog disappears
           setGame(prev => ({
             ...prev,
             currentWord: word,
-            wordOptions: [],
+            wordOptions: [], // Clear word options to hide the dialog
             status: 'playing'
           }));
           
-          toast({
-            title: "Word Selected",
-            description: `You're now drawing: ${word}`,
-            duration: 3000
-          });
-          
+          console.log(`Word selected successfully: ${word}`);
           resolve(true);
         } else {
           console.error("Failed to select word:", response.error);
