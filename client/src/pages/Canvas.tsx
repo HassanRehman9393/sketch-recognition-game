@@ -26,8 +26,9 @@ import { RoomSelector } from "@/components/RoomSelector/RoomSelector";
 import { useToast } from "@/components/ui/use-toast";
 import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
 import { ActiveGame } from '@/components/GameUI/ActiveGame';
-import { DrawingTimer } from '@/components/GameUI/DrawingTimer';
 import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
+import { PredictionDisplay } from "@/components/PredictionDisplay/PredictionDisplay";
+import { AIPredictionActions } from "@/components/GameUI/AIPredictionActions";
 
 
 interface Point {
@@ -65,6 +66,7 @@ const Canvas = () => {
   const { isInGame, game, isMyTurn, timeRemaining } = useGame();
   const { leaveRoom } = useRooms();
   const { toast } = useToast();
+  const [lastPredictionTime, setLastPredictionTime] = useState<number | null>(null);
   
   // Colors array for the color picker
   const colors = [
@@ -668,6 +670,83 @@ const Canvas = () => {
     );
   };
 
+  // Improve the canvas capture function for better AI detection
+  const captureCanvasAsBase64 = () => {
+    if (!canvasRef.current) return null;
+    
+    // Create a temporary canvas without the grid background
+    const tempCanvas = document.createElement('canvas');
+    const canvas = canvasRef.current;
+    
+    // Use standardized size (256x256) for AI processing
+    tempCanvas.width = 256; 
+    tempCanvas.height = 256;
+    
+    // Get context and set white background
+    const ctx = tempCanvas.getContext('2d');
+    if (!ctx) return null;
+    
+    // Apply white background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    
+    // Calculate scaling to fit the drawing in the 256x256 canvas
+    const scale = Math.min(256 / canvas.width, 256 / canvas.height);
+    const offsetX = (256 - canvas.width * scale) / 2;
+    const offsetY = (256 - canvas.height * scale) / 2;
+    
+    // Draw the current canvas content onto the temporary canvas
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+    ctx.drawImage(canvas, 0, 0);
+    ctx.restore();
+    
+    // Clean up the base64 string - remove the data:image/png;base64, prefix if needed
+    const base64Image = tempCanvas.toDataURL('image/png', 1.0);
+    return base64Image;
+  };
+
+  // Function to determine prediction interval based on time remaining
+  const getPredictionInterval = (timeRemaining: number): number => {
+    if (timeRemaining > 45) return 5000; // 0-15 seconds elapsed: every 5 seconds
+    if (timeRemaining > 30) return 3000; // 15-30 seconds elapsed: every 3 seconds
+    if (timeRemaining > 15) return 2000; // 30-45 seconds elapsed: every 2 seconds
+    return 1000; // 45-60 seconds elapsed: every 1 second
+  };
+  
+  // Effect to trigger AI predictions at dynamic intervals when it's the user's turn to draw
+  useEffect(() => {
+    // Only run when canvas is enabled, we're in a game, and it's our turn
+    if (!isCanvasEnabled || !isInGame || !isMyTurn || !roomId || !socket) return;
+    
+    const predictionInterval = getPredictionInterval(timeRemaining);
+    
+    // Create interval for predictions
+    const predictionTimer = setInterval(() => {
+      const now = Date.now();
+      const shouldSendPrediction = !lastPredictionTime || (now - lastPredictionTime) >= predictionInterval;
+      
+      if (shouldSendPrediction) {
+        // Capture canvas as base64 and send for prediction
+        const imageData = captureCanvasAsBase64();
+        if (imageData && socket && game.gameId) {
+          console.log(`Sending prediction request (interval: ${predictionInterval}ms)`);
+          setLastPredictionTime(now);
+          
+          // Send proper request format to server
+          socket.emit('game:requestPrediction', { 
+            roomId, // Use room ID 
+            imageData, // This is the base64 string
+            word: game.currentWord // Add the current word for context
+          });
+        }
+      }
+    }, 1000); // Check every second if we need to send a prediction
+    
+    return () => clearInterval(predictionTimer);
+  }, [isCanvasEnabled, isInGame, isMyTurn, timeRemaining, lastPredictionTime, roomId, socket, game.gameId, game.currentWord]);
+
   // If we don't have a roomId, show room selector
   if (!roomId) {
     return (
@@ -885,12 +964,65 @@ const Canvas = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3 }}
           >
-            {/* Keep only this timer in the canvas */}
+            {/* Enhanced professional timer UI with improved visual design */}
             {game.status === 'playing' && game.currentWord && (
-              <div className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full
-                             shadow-md backdrop-blur-sm bg-white/90 dark:bg-gray-800/90">
-                <FaClock className={timeRemaining <= 10 ? "text-red-500 animate-pulse" : "text-primary"} />
-                <span className="font-mono font-semibold">{timeRemaining}s</span>
+              <div className="absolute top-4 right-4 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl
+                            shadow-2xl backdrop-blur-md bg-gradient-to-br from-white/90 to-slate-50/80
+                            dark:from-slate-800/90 dark:to-slate-900/80 border border-white/30 
+                            dark:border-slate-700/50 transform transition-all duration-300 hover:scale-105
+                            hover:shadow-blue-500/20 dark:hover:shadow-blue-500/10">
+                <div className="relative flex items-center justify-center">
+                  <div className={`absolute inset-0 rounded-full ${
+                    timeRemaining <= 10 ? "animate-ping bg-red-500/30" : ""
+                  }`}></div>
+                  <div className={`h-9 w-9 flex items-center justify-center rounded-full ${
+                    timeRemaining <= 10 
+                      ? "bg-red-500 text-white" 
+                      : "bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400"
+                  }`}>
+                    <FaClock className={`text-lg ${
+                      timeRemaining <= 10 ? "animate-pulse" : ""
+                    }`} />
+                  </div>
+                </div>
+                
+                <div className="flex flex-col">
+                  <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold">
+                    Time Left
+                  </span>
+                  <div className="flex items-baseline">
+                    <span className={`font-mono font-bold text-2xl tracking-widest leading-none ${
+                      timeRemaining <= 10 
+                        ? "text-red-500 animate-pulse" 
+                        : "text-slate-800 dark:text-slate-100"
+                    }`}>
+                      {timeRemaining < 10 ? `0${timeRemaining}` : timeRemaining}
+                    </span>
+                    <span className="text-xs ml-1 font-medium text-slate-500 dark:text-slate-400">
+                      sec
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Add the PredictionDisplay component - only for drawer */}
+            {isMyTurn && isCanvasEnabled && (
+              <div className="absolute top-4 left-4 z-50 w-72 space-y-3">
+                <PredictionDisplay 
+                  showConfidence={true}
+                  maxItems={3}
+                  className="animate-in fade-in slide-in-from-top-5 duration-300"
+                />
+                
+                {/* Fix the type error by creating a non-null ref to pass */}
+                {canvasRef.current && (
+                  <AIPredictionActions 
+                    canvasRef={canvasRef as React.RefObject<HTMLCanvasElement>} 
+                    roomId={roomId!}
+                    className="animate-in fade-in slide-in-from-top-5 duration-300 delay-300"
+                  />
+                )}
               </div>
             )}
             

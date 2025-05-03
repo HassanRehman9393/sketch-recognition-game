@@ -8,11 +8,12 @@ import Layout from './components/Layout/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import Canvas from './pages/Canvas';
+import Canvas from './pages/Canvas';  // Make sure this import is correct
 import HowToPlay from './pages/HowToPlay';
 import { Toaster } from './components/ui/toaster';
 import { DirectWordSelector } from './components/DirectWordSelector/DirectWordSelector';
 
+// Ensure Canvas is exported correctly
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="ui-theme">

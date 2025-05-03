@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGame } from '@/contexts/GameContext';
-import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { FaRobot, FaLightbulb } from 'react-icons/fa';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 interface PredictionDisplayProps {
   showConfidence?: boolean;
@@ -91,21 +91,11 @@ export function PredictionDisplay({
                       : ''
                   }`}
                 >
-                  <span>{prediction.label}</span>
+                  <span className="overflow-hidden text-ellipsis">{prediction.label}</span>
                   {showConfidence && (
-                    <div className="flex items-center gap-2 w-1/2">
-                      <Progress 
-                        value={prediction.confidence * 100} 
-                        className={`h-2 ${
-                          prediction.label.toLowerCase() === game.currentWord?.toLowerCase()
-                            ? 'bg-green-200 dark:bg-green-900' 
-                            : ''
-                        }`}
-                      />
-                      <span className="text-xs w-12">
-                        {Math.round(prediction.confidence * 100)}%
-                      </span>
-                    </div>
+                    <Badge variant="outline" className="ml-2 font-mono">
+                      {Math.round(prediction.confidence * 100)}%
+                    </Badge>
                   )}
                 </motion.div>
               ))}

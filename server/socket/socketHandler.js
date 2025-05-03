@@ -992,6 +992,79 @@ function initializeSocket(io) {
         if (callback) callback({ success: false, error: 'Server error' });
       }
     });
+
+    // Add prediction request handler
+    socket.on('game:requestPrediction', async (data) => {
+      try {
+        const { roomId, imageData, word } = data;
+        console.log(`Received prediction request for room: ${roomId}, image data length: ${imageData?.length || 0}`);
+        
+        if (!imageData) {
+          console.error('No image data provided for prediction');
+          return;
+        }
+        
+        // Format the request payload properly according to the AI service expectations
+        const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:5002';
+        const axios = require('axios');
+        
+        console.log(`Forwarding prediction request to AI service at ${aiServiceUrl}/api/recognize`);
+        
+        const requestData = { 
+          image_data: imageData // Use the correct field name expected by AI service
+        };
+        
+        // Add debug logging to see what we're sending
+        console.log(`Request payload size: ${JSON.stringify(requestData).length} bytes`);
+        
+        const aiResponse = await axios.post(`${aiServiceUrl}/api/recognize`, requestData, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 8000 // 8 second timeout
+        });
+        
+        console.log('AI service response received:', aiResponse.data);
+        
+        // Transform response to match client expectations
+        // FIX: Handle the correct structure with top_predictions
+        let predictions = [];
+        if (aiResponse.data && aiResponse.data.predictions) {
+          if (Array.isArray(aiResponse.data.predictions)) {
+            // If predictions is already an array, use that
+            predictions = aiResponse.data.predictions;
+          } else if (aiResponse.data.predictions.top_predictions && 
+                    Array.isArray(aiResponse.data.predictions.top_predictions)) {
+            // If predictions contains a top_predictions array, use that
+            predictions = aiResponse.data.predictions.top_predictions;
+          }
+        }
+        
+        // Format predictions to match client expectations
+        const formattedResponse = {
+          predictions: predictions.map(p => ({
+            label: p.class || p.label || p.className || p.name,
+            confidence: typeof p.confidence === 'number' ? p.confidence : 
+                       typeof p.score === 'number' ? p.score : 0.5
+          }))
+        };
+        
+        console.log('Formatted predictions for client:', formattedResponse);
+        
+        // Send predictions back to the client
+        socket.emit('game:aiPrediction', formattedResponse);
+      } catch (error) {
+        console.error('Error processing AI prediction request:', error.message);
+        // If there's a response from the service with an error message, log it
+        if (error.response) {
+          console.error('AI service error details:', error.response.data);
+        }
+        socket.emit('game:aiPrediction', { 
+          error: 'Failed to process drawing',
+          predictions: [] 
+        });
+      }
+    });
   });
 }
 

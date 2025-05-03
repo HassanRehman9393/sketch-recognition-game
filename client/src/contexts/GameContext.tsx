@@ -371,12 +371,54 @@ export function GameProvider({ children }: { children: ReactNode }) {
     
     // AI Prediction event
     const handleAIPrediction = (data: any) => {
+      console.log("Received AI prediction response:", data);
+      
       if (data.predictions && Array.isArray(data.predictions)) {
-        setGame(prev => ({
-          ...prev,
-          aiPredictions: data.predictions,
-          lastPredictionTime: Date.now()
-        }));
+        try {
+          // Transform the predictions to match our interface
+          const formattedPredictions = data.predictions.map((p: any) => ({
+            label: p.class || p.label || "",
+            confidence: p.confidence / 100  // Convert from percentage to 0-1 scale if needed
+          }));
+          
+          // Sort predictions by confidence (highest first)
+          formattedPredictions.sort((a: any, b: any) => b.confidence - a.confidence);
+          
+          console.log("Processed AI predictions:", formattedPredictions);
+          
+          // Only update if predictions are non-empty
+          if (formattedPredictions.length > 0) {
+            setGame(prev => ({
+              ...prev,
+              aiPredictions: formattedPredictions,
+              lastPredictionTime: Date.now()
+            }));
+            
+            // If we get a high-confidence match with the current word
+            const topPrediction = formattedPredictions[0];
+            if (game.currentWord && isMyTurn && topPrediction && 
+                topPrediction.confidence > 0.7 && 
+                topPrediction.label.toLowerCase() === game.currentWord.toLowerCase()) {
+              
+              console.log("High confidence match detected:", topPrediction);
+              
+              // Play a success sound if available
+              const successSound = document.getElementById('success-sound') as HTMLAudioElement;
+              if (successSound) {
+                successSound.play().catch(e => console.log('Could not play sound:', e));
+              }
+              
+              // Show a toast notification for the high-confidence match
+              toast({
+                title: "AI recognized your drawing!",
+                description: `The AI is confident this is a "${topPrediction.label}" (${Math.floor(topPrediction.confidence * 100)}%)`,
+                duration: 3000,
+              });
+            }
+          }
+        } catch (error) {
+          console.error("Error processing AI predictions:", error);
+        }
       }
     };
     
@@ -465,7 +507,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off('game:aiPrediction', handleAIPrediction);
       socket.off('game:playerDisconnected', handlePlayerDisconnected);
     };
-  }, [socket, isConnected, toast, user, countdown]);
+  }, [socket, isConnected, toast, user, countdown, game.currentWord, isMyTurn]);
 
   // Check for game in progress on initial load
   useEffect(() => {
@@ -673,16 +715,27 @@ export function GameProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Send drawing for prediction with throttling
+  // Send drawing for prediction with improved error handling
   const sendDrawingForPrediction = async (roomId: string, imageData: string): Promise<void> => {
-    if (!socket || !isConnected || !isMyTurn) return;
-
+    if (!socket || !isConnected) {
+      console.error("Socket not connected - can't send prediction");
+      return;
+    }
+  
+    if (!isMyTurn) {
+      console.log("Not user's turn - skipping prediction");
+      return;
+    }
+  
     // Don't send predictions too frequently - throttle to once every 1.5 seconds
     if (predictionThrottleTimeout) {
       return;
     }
-
+  
     try {
+      // Log that we're sending a prediction request
+      console.log('Sending drawing for prediction with data length:', imageData.length);
+      
       socket.emit('game:requestPrediction', { 
         roomId,
         imageData,

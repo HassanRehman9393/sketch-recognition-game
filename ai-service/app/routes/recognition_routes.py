@@ -44,7 +44,7 @@ def init_recognition_service():
         logger.error(f"Error initializing recognition service: {e}")
         logger.error(traceback.format_exc())
 
-@recognition_bp.route('/recognize', methods=['POST'])
+@recognition_bp.route('/api/recognize', methods=['POST'])
 def recognize_sketch():
     """
     Recognize a sketch from canvas data
@@ -62,9 +62,9 @@ def recognize_sketch():
         logger.debug(f"New recognition request received: {request.content_type}")
         
         # Check if recognition service is initialized
-        if recognition_service is None:
+        if 'recognition_service' not in globals() or recognition_service is None:
             init_recognition_service()
-            if recognition_service is None:
+            if 'recognition_service' not in globals() or recognition_service is None:
                 return jsonify({
                     "success": False,
                     "error": "Recognition service not available"
@@ -73,23 +73,56 @@ def recognize_sketch():
         # Get image data from request
         image_data = None
         
-        # Case 1: Image file in multipart/form-data
-        if 'image' in request.files:
-            file = request.files['image']
-            image_data = file.read()
+        try:
+            # Try to parse the request JSON
+            if request.is_json:
+                req_data = request.get_json()
+                logger.debug(f"JSON data keys: {req_data.keys() if req_data else 'None'}")
+                
+                # Check for various possible field names
+                if 'image_data' in req_data:
+                    image_data = req_data['image_data']
+                elif 'imageData' in req_data:
+                    image_data = req_data['imageData']
+                
+            # If not JSON or image_data not found in JSON
+            if image_data is None:
+                # Try multipart form
+                if 'image' in request.files:
+                    file = request.files['image']
+                    image_data = file.read()
+                # Try raw body (direct base64)
+                elif request.data:
+                    try:
+                        # Try to parse as JSON one more time
+                        data = json.loads(request.data)
+                        if 'image_data' in data:
+                            image_data = data['image_data']
+                        elif 'imageData' in data:
+                            image_data = data['imageData']
+                        else:
+                            # Assume the whole body is the base64 data
+                            image_data = request.data.decode('utf-8')
+                    except:
+                        # Assume the whole body is the base64 data
+                        image_data = request.data.decode('utf-8')
+        except Exception as parse_error:
+            logger.warning(f"Error parsing request: {parse_error}")
+            logger.warning(f"Request content type: {request.content_type}")
+            logger.warning(f"Request data sample: {str(request.data)[:100]}...")
             
-        # Case 2: Base64 encoded image in JSON
-        elif request.is_json and 'image_data' in request.json:
-            image_data = request.json['image_data']
-            
-        # Case 3: Raw image data in request body
-        elif request.data:
-            image_data = request.data
-        
-        else:
             return jsonify({
                 "success": False,
-                "error": "No image data provided"
+                "error": f"Invalid JSON payload: {str(parse_error)}",
+                "predictions": []
+            }), 400
+            
+        if image_data is None:
+            logger.warning("No image data found in request")
+            return jsonify({
+                "success": False,
+                "error": "No image data provided",
+                "predictions": []
             }), 400
             
         # Perform recognition
