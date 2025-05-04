@@ -129,3 +129,5 @@ def create_app(test_config=None):
         return jsonify({'error': 'Request entity too large (max 2MB)', 'status_code': 413}), 413
     
     return app
+
+# This file ensures the app directory is treated as a Python package

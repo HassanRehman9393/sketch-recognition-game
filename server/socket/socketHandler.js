@@ -1027,27 +1027,29 @@ function initializeSocket(io) {
         console.log('AI service response received:', aiResponse.data);
         
         // Transform response to match client expectations
-        // FIX: Handle the correct structure with top_predictions
+        // Handle the nested predictions structure from the AI service
         let predictions = [];
+        
         if (aiResponse.data && aiResponse.data.predictions) {
-          if (Array.isArray(aiResponse.data.predictions)) {
-            // If predictions is already an array, use that
-            predictions = aiResponse.data.predictions;
-          } else if (aiResponse.data.predictions.top_predictions && 
-                    Array.isArray(aiResponse.data.predictions.top_predictions)) {
-            // If predictions contains a top_predictions array, use that
-            predictions = aiResponse.data.predictions.top_predictions;
+          if (aiResponse.data.predictions.top_predictions) {
+            // The AI service returns predictions in a nested structure
+            predictions = aiResponse.data.predictions.top_predictions.map(pred => ({
+              label: pred.class || pred.label || "",
+              confidence: pred.confidence || 0
+            }));
+          } else if (Array.isArray(aiResponse.data.predictions)) {
+            // Handle case where predictions is a direct array
+            predictions = aiResponse.data.predictions.map(pred => ({
+              label: pred.class || pred.label || "",
+              confidence: pred.confidence || 0
+            }));
           }
         }
         
-        // Format predictions to match client expectations
-        const formattedResponse = {
-          predictions: predictions.map(p => ({
-            label: p.class || p.label || p.className || p.name,
-            confidence: typeof p.confidence === 'number' ? p.confidence : 
-                       typeof p.score === 'number' ? p.score : 0.5
-          }))
-        };
+        // Sort predictions by confidence
+        predictions.sort((a, b) => b.confidence - a.confidence);
+        
+        const formattedResponse = { predictions };
         
         console.log('Formatted predictions for client:', formattedResponse);
         

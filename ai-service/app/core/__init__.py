@@ -2,4 +2,4 @@
 Core business logic for the AI service
 """
 
-# This file makes the directory a Python package
+# This file ensures the core directory is treated as a Python package

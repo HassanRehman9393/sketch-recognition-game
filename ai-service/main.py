@@ -39,9 +39,9 @@ def create_app():
     allowed_origins = os.getenv('ALLOW_ORIGINS', 'http://localhost:3000').split(',')
     CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     
-    # Register blueprints
-    from app.api.recognition_routes import recognition_bp
-    app.register_blueprint(recognition_bp)
+    # Register blueprints - FIX: Use routes instead of api
+    from app.routes.recognition_routes import register_routes
+    register_routes(app)
     
     # Root endpoint for health check
     @app.route('/', methods=['GET'])
