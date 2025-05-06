@@ -97,9 +97,44 @@ def recognize_sketch():
                 "predictions": []
             }), 400
         
+        # Save request sample for debugging (5% of requests)
+        if np.random.random() < 0.05:  # 5% of requests
+            debug_dir = Path("debug_data")
+            debug_dir.mkdir(exist_ok=True)
+            
+            # If it's a base64 image, try to save it
+            if isinstance(image_data, str) and (
+                image_data.startswith('data:image') or
+                all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in image_data[:100])
+            ):
+                try:
+                    # Extract actual base64 data if it's a data URI
+                    if image_data.startswith('data:image'):
+                        img_data = re.sub(r'^data:image/[^;]+;base64,', '', image_data)
+                    else:
+                        img_data = image_data
+
+                    # Save for debug purposes
+                    img_bytes = base64.b64decode(img_data)
+                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    img_path = debug_dir / f"debug_request_{timestamp}.png"
+                    with open(img_path, 'wb') as f:
+                        f.write(img_bytes)
+                        
+                    logger.debug(f"Saved debug image to {img_path}")
+                except Exception as e:
+                    logger.error(f"Error saving debug image: {e}")
+        
         # Perform recognition
         logger.info(f"Performing recognition on image data (length={len(image_data) if isinstance(image_data, (str, bytes)) else 'unknown'})")
         results = recognition_service.recognize_sketch(image_data)
+        
+        # Log the prediction results
+        if results and 'predictions' in results and 'top_predictions' in results['predictions']:
+            top_predictions = results['predictions']['top_predictions']
+            logger.info(f"Recognition found {len(top_predictions)} predictions")
+            for i, pred in enumerate(top_predictions[:5]):
+                logger.info(f"  Top {i+1}: {pred['class']} ({pred['confidence']:.2f}%)")
         
         # Add processing time
         results['processing_time_ms'] = round((time.time() - start_time) * 1000, 2)

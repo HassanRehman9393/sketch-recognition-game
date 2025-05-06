@@ -5,6 +5,13 @@ import { FaPencilAlt, FaSpinner } from 'react-icons/fa';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 
+// Define the valid categories that match our model's capabilities
+const validCategories = [
+  "airplane", "apple", "bicycle", "car", "cat", 
+  "chair", "clock", "dog", "face", "fish", 
+  "house", "star", "tree", "umbrella"
+];
+
 interface WordSelectionDialogProps {
   open: boolean;
   roomId: string;
@@ -18,6 +25,15 @@ export function WordSelectionDialog({
   words,
   onSelectionComplete 
 }: WordSelectionDialogProps) {
+  // Filter the words to only include valid categories
+  const validWords = words.filter(word => validCategories.includes(word));
+  
+  // If we don't have enough valid words, add some default ones to ensure we have at least 3 options
+  const displayWords = validWords.length >= 3 ? validWords : [
+    ...validWords,
+    ...validCategories.filter(cat => !validWords.includes(cat)).slice(0, 3 - validWords.length)
+  ];
+
   const { selectWord } = useGame();
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectedWordIndex, setSelectedWordIndex] = useState<number | null>(null);
@@ -141,7 +157,7 @@ export function WordSelectionDialog({
           
           {/* Word options */}
           <div className="space-y-2">
-            {words && words.map((word, i) => (
+            {displayWords && displayWords.map((word, i) => (
               <Button
                 key={word || `word-${i}`}
                 variant={selectedWordIndex === i ? "default" : "outline"}

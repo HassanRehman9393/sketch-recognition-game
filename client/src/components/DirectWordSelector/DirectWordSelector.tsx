@@ -4,6 +4,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createPortal } from 'react-dom';
 import { WordSelectionDialog } from '@/components/WordSelectionDialog/WordSelectionDialog';
 
+// Add validation for word options to ensure they match our supported categories
+const validCategories = [
+  "airplane", "apple", "bicycle", "car", "cat", 
+  "chair", "clock", "dog", "face", "fish", 
+  "house", "star", "tree", "umbrella"
+];
+
 // This component will be mounted at the application root level to catch all word selection events
 export function DirectWordSelector() {
   const { game, isMyTurn } = useGame();
@@ -14,7 +21,9 @@ export function DirectWordSelector() {
   const hasWordOptions = Boolean(
     game.wordOptions && 
     Array.isArray(game.wordOptions) && 
-    game.wordOptions.length > 0
+    game.wordOptions.length > 0 &&
+    // Add validation to ensure word options are from our supported categories
+    game.wordOptions.every(word => validCategories.includes(word))
   );
   
   // Set initialLoadComplete after auth loading is done

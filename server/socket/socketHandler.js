@@ -27,6 +27,38 @@ const roomCodes = new Map();
 // Map to track active game sessions
 const activeGames = new Map();
 
+// Add the fixed set of categories to use for the game
+const trainedCategories = [
+  "airplane", "apple", "bicycle", "car", "cat", 
+  "chair", "clock", "dog", "face", "fish", 
+  "house", "star", "tree", "umbrella"
+];
+
+/**
+ * Get random words from the available categories
+ * @param {Number} count Number of words to get
+ * @returns {Array} Array of randomly selected words
+ */
+function getRandomWords(count = 3) {
+  // Use the fixed set of categories instead of importing from gameService
+  
+  // Shuffle and take the first 'count' items
+  return shuffleArray([...trainedCategories]).slice(0, count);
+}
+
+/**
+ * Shuffle an array using Fisher-Yates algorithm
+ * @param {Array} array The array to shuffle
+ * @returns {Array} Shuffled array
+ */
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 // Helper function to broadcast room list - moved outside the connection handler
 function broadcastRoomsList(io) {
   const publicRooms = Array.from(rooms.values())
@@ -480,9 +512,9 @@ function initializeSocket(io) {
               hasPlayed: false
             }));
             
-            // Update word options - use AI categories
+            // Update word options - use our defined categories
             const useAI = gameSettings?.useAI !== undefined ? gameSettings.useAI : true;
-            existingGame.wordOptions = gameService.getRandomWords(3, useAI);
+            existingGame.wordOptions = getRandomWords(3);
             
             await existingGame.save();
             activeGames.set(roomId, existingGame);
@@ -581,7 +613,7 @@ function initializeSocket(io) {
           totalRounds: rounds,
           roundTimeLimit: timeLimit,
           status: 'waiting',
-          wordOptions: gameService.getRandomWords(3, useAI)
+          wordOptions: getRandomWords(3)
         });
         
         await game.save();
@@ -1017,56 +1049,156 @@ function initializeSocket(io) {
         // Add debug logging to see what we're sending
         console.log(`Request payload size: ${JSON.stringify(requestData).length} bytes`);
         
-        const aiResponse = await axios.post(`${aiServiceUrl}/api/recognize`, requestData, {
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          timeout: 8000 // 8 second timeout
-        });
+        // Increase the timeout to 15 seconds and add retry logic
+        const maxRetries = 2;
+        let retryCount = 0;
+        let lastError = null;
         
-        console.log('AI service response received:', aiResponse.data);
-        
-        // Transform response to match client expectations
-        // Handle the nested predictions structure from the AI service
-        let predictions = [];
-        
-        if (aiResponse.data && aiResponse.data.predictions) {
-          if (aiResponse.data.predictions.top_predictions) {
-            // The AI service returns predictions in a nested structure
-            predictions = aiResponse.data.predictions.top_predictions.map(pred => ({
-              label: pred.class || pred.label || "",
-              confidence: pred.confidence || 0
-            }));
-          } else if (Array.isArray(aiResponse.data.predictions)) {
-            // Handle case where predictions is a direct array
-            predictions = aiResponse.data.predictions.map(pred => ({
-              label: pred.class || pred.label || "",
-              confidence: pred.confidence || 0
-            }));
+        while (retryCount <= maxRetries) {
+          try {
+            const aiResponse = await axios.post(`${aiServiceUrl}/api/recognize`, requestData, {
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              timeout: 15000 // Increased from 8000 to 15000 ms (15 seconds)
+            });
+            
+            console.log('AI service response received:', aiResponse.data);
+            
+            // Transform response to match client expectations
+            // Handle the nested predictions structure from the AI service
+            let predictions = [];
+            
+            if (aiResponse.data && aiResponse.data.predictions) {
+              if (aiResponse.data.predictions.top_predictions) {
+                // The AI service returns predictions in a nested structure
+                predictions = aiResponse.data.predictions.top_predictions.map(pred => ({
+                  label: pred.class || pred.label || "",
+                  confidence: pred.confidence || 0
+                }));
+              } else if (Array.isArray(aiResponse.data.predictions)) {
+                // Handle case where predictions is a direct array
+                predictions = aiResponse.data.predictions.map(pred => ({
+                  label: pred.class || pred.label || "",
+                  confidence: pred.confidence || 0
+                }));
+              }
+            }
+            
+            // Sort predictions by confidence
+            predictions.sort((a, b) => b.confidence - a.confidence);
+            
+            const formattedResponse = { predictions };
+            
+            console.log('Formatted predictions for client:', formattedResponse);
+            
+            // Send predictions back to the client
+            socket.emit('game:aiPrediction', formattedResponse);
+            
+            // Break out of retry loop on success
+            break;
+          } catch (error) {
+            lastError = error;
+            retryCount++;
+            
+            // Log retry attempt
+            if (retryCount <= maxRetries) {
+              console.warn(`AI service request failed. Retrying (${retryCount}/${maxRetries})...`);
+              // Wait before retrying (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+            }
           }
         }
         
-        // Sort predictions by confidence
-        predictions.sort((a, b) => b.confidence - a.confidence);
-        
-        const formattedResponse = { predictions };
-        
-        console.log('Formatted predictions for client:', formattedResponse);
-        
-        // Send predictions back to the client
-        socket.emit('game:aiPrediction', formattedResponse);
+        // Handle case when all retries failed
+        if (retryCount > maxRetries) {
+          console.error('Error processing AI prediction request after retries:', lastError.message);
+          
+          // Return fallback predictions when AI service is unavailable
+          const fallbackPredictions = generateFallbackPredictions(word);
+          socket.emit('game:aiPrediction', { 
+            predictions: fallbackPredictions,
+            isFallback: true
+          });
+        }
       } catch (error) {
         console.error('Error processing AI prediction request:', error.message);
         // If there's a response from the service with an error message, log it
         if (error.response) {
           console.error('AI service error details:', error.response.data);
         }
+        
+        // Return fallback predictions with error flag
         socket.emit('game:aiPrediction', { 
           error: 'Failed to process drawing',
-          predictions: [] 
+          predictions: generateFallbackPredictions(data?.word),
+          isFallback: true
         });
       }
     });
+
+    /**
+     * Generate fallback predictions when AI service is unavailable
+     * @param {string} word Optional current word to bias predictions
+     * @returns {Array} Array of prediction objects
+     */
+    function generateFallbackPredictions(word = null) {
+      // Use our defined trained categories
+      const categories = trainedCategories;
+      
+      // Create randomized but deterministic predictions
+      const seed = Date.now() % 10000;
+      const rng = mulberry32(seed);
+      
+      // If we know the current word, ensure it appears in the list
+      let predictions = [];
+      if (word && typeof word === 'string' && word.trim() !== '') {
+        const cleanWord = word.trim().toLowerCase();
+        if (categories.includes(cleanWord)) {
+          // Give the actual word a reasonable confidence
+          const confidence = 30 + Math.floor(rng() * 40); // 30-70% confidence
+          predictions.push({
+            label: cleanWord,
+            confidence: confidence
+          });
+        }
+      }
+      
+      // Add other random predictions
+      const usedLabels = new Set(predictions.map(p => p.label));
+      while (predictions.length < 5) {
+        // Pick a random category
+        const idx = Math.floor(rng() * categories.length);
+        const category = categories[idx];
+        
+        if (!usedLabels.has(category)) {
+          usedLabels.add(category);
+          predictions.push({
+            label: category,
+            confidence: 5 + Math.floor(rng() * 60) // 5-65% confidence
+          });
+        }
+      }
+      
+      // Sort by confidence
+      predictions.sort((a, b) => b.confidence - a.confidence);
+      
+      return predictions;
+    }
+
+    /**
+     * Simple seedable RNG function
+     * @param {number} seed A numeric seed
+     * @returns {function} RNG function that returns values between 0 and 1
+     */
+    function mulberry32(seed) {
+      return function() {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
   });
 }
 
@@ -1347,9 +1479,9 @@ async function setupNextTurn(io, roomId) {
       return true;
     }
     
-    // Update next drawer and word options - use AI trained categories
+    // Update next drawer and word options - use our defined categories
     game.currentDrawerId = nextDrawer.userId;
-    game.wordOptions = gameService.getRandomWords(3, true);
+    game.wordOptions = getRandomWords(3);
     game.status = 'waiting';
     
     // Mark the player as having played

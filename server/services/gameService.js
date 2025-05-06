@@ -2,11 +2,11 @@
  * Game service for handling game-related operations
  */
 
-// List of words from the trained AI categories
+// List of words from the trained AI categories - update to match model's actual categories
 const trainedCategories = [
-  'apple', 'airplane', 'cat', 'bicycle', 'dog', 
-  'car', 'fish', 'house', 'tree', 'bird', 
-  'banana', 'pencil', 'flower', 'sun'
+  "airplane", "apple", "bicycle", "car", "cat", 
+  "chair", "clock", "dog", "face", "fish", 
+  "house", "star", "tree", "umbrella"
 ];
 
 /**
@@ -16,12 +16,8 @@ const trainedCategories = [
  * @returns {Array} Array of randomly selected words
  */
 function getRandomWords(count = 3, useAI = true) {
-  const wordList = useAI ? trainedCategories : [...trainedCategories, 
-    // Extended list for non-AI mode
-    'chair', 'table', 'book', 'computer', 'phone', 'door',
-    'window', 'hat', 'shoe', 'clock', 'cup', 'guitar',
-    'lamp', 'mountain', 'ocean', 'star', 'train', 'umbrella'
-  ];
+  // Always use the trained categories to match the model's capabilities
+  const wordList = trainedCategories;
   
   // Shuffle and take the first 'count' items
   return shuffleArray([...wordList]).slice(0, count);
