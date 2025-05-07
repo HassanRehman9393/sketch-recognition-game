@@ -28,7 +28,6 @@ import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
 import { ActiveGame } from '@/components/GameUI/ActiveGame';
 import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
 import { PredictionDisplay } from "@/components/PredictionDisplay/PredictionDisplay";
-import { AIPredictionActions } from "@/components/GameUI/AIPredictionActions";
 
 
 interface Point {
@@ -67,6 +66,9 @@ const Canvas = () => {
   const { leaveRoom } = useRooms();
   const { toast } = useToast();
   const [lastPredictionTime, setLastPredictionTime] = useState<number | null>(null);
+  const [drawingStartTime, setDrawingStartTime] = useState<number | null>(null);
+  const [allowPredictions, setAllowPredictions] = useState(false);
+  const [firstPredictionSent, setFirstPredictionSent] = useState(false);
   
   // Colors array for the color picker
   const colors = [
@@ -293,6 +295,30 @@ const Canvas = () => {
       socket.off('canvas_cleared', handleCanvasCleared);
       socket.off('undo', handleUndo);
       socket.off('redo', handleRedo);
+    };
+  }, [socket, isConnected, user, toast]);
+
+  // Listen for score updates from server
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleScoreUpdate = (data: any) => {
+      console.log("Score update received:", data);
+      
+      // Show a toast notification for score updates if it's not the current user
+      if (data.userId !== user?.id) {
+        toast({
+          title: `${data.username} earned points!`,
+          description: `Their drawing was recognized in ${data.recognitionTimeSeconds}s. +${data.roundScore} points!`,
+          duration: 3000,
+        });
+      }
+    };
+    
+    socket.on('game:scoreUpdate', handleScoreUpdate);
+    
+    return () => {
+      socket.off('game:scoreUpdate', handleScoreUpdate);
     };
   }, [socket, isConnected, user, toast]);
 
@@ -567,7 +593,7 @@ const Canvas = () => {
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
   };
-  
+
   const handleSave = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -610,18 +636,16 @@ const Canvas = () => {
     link.href = dataUrl;
     link.click();
   };
-  
+
   const handleLeaveRoom = () => {
     // Clear game started flag when leaving the room
     localStorage.removeItem(`game_started_${roomId}`);
-    
     leaveRoom();
     setRoomId(null);
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
     localStorage.removeItem('currentRoomId');
     sessionStorage.removeItem('wasInRoom');
-    
     toast({
       title: 'Room Left',
       description: 'You have left the drawing room',
@@ -632,21 +656,19 @@ const Canvas = () => {
   const handleLeaveGame = () => {
     // Clear game started flag when leaving the game
     localStorage.removeItem(`game_started_${roomId}`);
-    
     leaveRoom();
     setRoomId(null);
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
     localStorage.removeItem('currentRoomId');
     sessionStorage.removeItem('wasInRoom');
-    
     toast({
       title: 'Game Left',
       description: 'You have left the game',
       duration: 3000
     });
   };
-  
+
   // Update the ViewerTimer component for better visibility
   const ViewerTimer = () => {
     const isUrgent = timeRemaining <= 10;
@@ -670,7 +692,7 @@ const Canvas = () => {
     );
   };
 
-  // Improve the canvas capture function for better AI detection
+  // Improved capture canvas function (without debug logs)
   const captureCanvasAsBase64 = () => {
     if (!canvasRef.current) return null;
     
@@ -678,9 +700,9 @@ const Canvas = () => {
     const tempCanvas = document.createElement('canvas');
     const canvas = canvasRef.current;
     
-    // Use standardized size (256x256) for AI processing
-    tempCanvas.width = 256; 
-    tempCanvas.height = 256;
+    // Use smaller size (224x224) for AI processing to reduce payload size
+    tempCanvas.width = 224; 
+    tempCanvas.height = 224;
     
     // Get context and set white background
     const ctx = tempCanvas.getContext('2d');
@@ -690,10 +712,10 @@ const Canvas = () => {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     
-    // Calculate scaling to fit the drawing in the 256x256 canvas
-    const scale = Math.min(256 / canvas.width, 256 / canvas.height);
-    const offsetX = (256 - canvas.width * scale) / 2;
-    const offsetY = (256 - canvas.height * scale) / 2;
+    // Calculate scaling to fit the drawing in the canvas
+    const scale = Math.min(224 / canvas.width, 224 / canvas.height);
+    const offsetX = (224 - canvas.width * scale) / 2;
+    const offsetY = (224 - canvas.height * scale) / 2;
     
     // Draw the current canvas content onto the temporary canvas
     ctx.save();
@@ -702,50 +724,191 @@ const Canvas = () => {
     ctx.drawImage(canvas, 0, 0);
     ctx.restore();
     
-    // Clean up the base64 string - remove the data:image/png;base64, prefix if needed
-    const base64Image = tempCanvas.toDataURL('image/png', 1.0);
-    return base64Image;
+    // Clean up the base64 string and use lower quality to reduce payload size
+    return tempCanvas.toDataURL('image/jpeg', 0.8);
   };
 
-  // Function to determine prediction interval based on time remaining
-  const getPredictionInterval = (timeRemaining: number): number => {
-    if (timeRemaining > 45) return 5000; // 0-15 seconds elapsed: every 5 seconds
-    if (timeRemaining > 30) return 3000; // 15-30 seconds elapsed: every 3 seconds
-    if (timeRemaining > 15) return 2000; // 30-45 seconds elapsed: every 2 seconds
-    return 1000; // 45-60 seconds elapsed: every 1 second
+  // Improved function to determine prediction interval based on time remaining
+  const getPredictionInterval = (timeRemaining: number, hasMatch: boolean): number => {
+    // If we have a match already, slow down predictions to save resources
+    if (hasMatch) return 5000;
+    
+    // Otherwise adjust frequency based on time remaining
+    if (timeRemaining > 45) return 3000;    // 0-15 seconds elapsed: every 3 seconds
+    if (timeRemaining > 30) return 2500;    // 15-30 seconds elapsed: every 2.5 seconds
+    if (timeRemaining > 15) return 2000;    // 30-45 seconds elapsed: every 2 seconds
+    return 1500;                            // 45-60 seconds elapsed: every 1.5 seconds
   };
-  
+
   // Effect to trigger AI predictions at dynamic intervals when it's the user's turn to draw
   useEffect(() => {
     // Only run when canvas is enabled, we're in a game, and it's our turn
     if (!isCanvasEnabled || !isInGame || !isMyTurn || !roomId || !socket) return;
     
-    const predictionInterval = getPredictionInterval(timeRemaining);
+    // Don't proceed if we haven't passed the initial waiting period
+    if (!allowPredictions) return;
+    
+    // Check if we already have a correct match
+    const hasMatch = game.aiPredictions?.some((p: {label: string; confidence: number}) => 
+      p.label.toLowerCase() === game.currentWord?.toLowerCase()
+    ) || false;
+    
+    // If we have a match, prepare for auto-advancing by resetting canvas state
+    if (hasMatch) return;
+    
+    const predictionInterval = getPredictionInterval(timeRemaining, hasMatch);
     
     // Create interval for predictions
     const predictionTimer = setInterval(() => {
       const now = Date.now();
-      const shouldSendPrediction = !lastPredictionTime || (now - lastPredictionTime) >= predictionInterval;
+      const shouldSendPrediction = lastPredictionTime && (now - lastPredictionTime) >= predictionInterval;
       
-      if (shouldSendPrediction) {
-        // Capture canvas as base64 and send for prediction
+      // Only send predictions if conditions are met
+      if (shouldSendPrediction && canvasState.lines.length > 0 && !hasMatch) {
         const imageData = captureCanvasAsBase64();
         if (imageData && socket && game.gameId) {
-          console.log(`Sending prediction request (interval: ${predictionInterval}ms)`);
           setLastPredictionTime(now);
           
-          // Send proper request format to server
           socket.emit('game:requestPrediction', { 
-            roomId, // Use room ID 
-            imageData, // This is the base64 string
-            word: game.currentWord // Add the current word for context
+            roomId,
+            imageData,
+            word: game.currentWord,
+            pastInitialWait: true
           });
         }
       }
     }, 1000); // Check every second if we need to send a prediction
     
     return () => clearInterval(predictionTimer);
-  }, [isCanvasEnabled, isInGame, isMyTurn, timeRemaining, lastPredictionTime, roomId, socket, game.gameId, game.currentWord]);
+  }, [isCanvasEnabled, isInGame, isMyTurn, timeRemaining, roomId, socket, game.gameId, game.currentWord, 
+      game.aiPredictions, canvasState.lines, allowPredictions, lastPredictionTime]);
+
+  // Listen for round transitions to reset canvas and prediction state
+  useEffect(() => {
+    // Reset canvas and prediction state when status changes to 'round_end' or 'waiting'
+    if ((game.status === 'round_end' || game.status === 'waiting') && 
+        canvasState.lines.length > 0) {
+      setCanvasState({
+        lines: [],
+        currentLine: null
+      });
+      setUndoStack([]);
+      setLastPredictionTime(null);
+      
+      // Clear the physical canvas too
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          // Redraw grid
+          const canvas = canvasRef.current;
+          ctx.strokeStyle = '#e5e7eb';
+          ctx.lineWidth = 0.5;
+          
+          // Draw vertical lines
+          for (let x = 0; x <= canvas.width; x += 20) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+          }
+          
+          // Draw horizontal lines
+          for (let y = 0; y <= canvas.height; y += 20) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+  }, [game.status]);
+
+  // Track when drawing starts and setup timing for predictions
+  useEffect(() => {
+    // Reset these values when the round/game status changes
+    if (game.status !== 'playing') {
+      setDrawingStartTime(null);
+      setAllowPredictions(false);
+      setFirstPredictionSent(false);
+      setLastPredictionTime(null);
+      return;
+    }
+    
+    // Set drawing start time for all cases when game.status is 'playing'
+    if (game.status === 'playing') {
+      const now = Date.now();
+      
+      if (!drawingStartTime) {
+        setDrawingStartTime(now);
+        
+        // First set a timer to allow predictions after 15 seconds from now
+        const timer = setTimeout(() => {
+          setAllowPredictions(true);
+          
+          // Then after 5 more seconds (20 seconds total) send first prediction request
+          const firstPredictionTimer = setTimeout(() => {
+            if (isMyTurn && isCanvasEnabled) {
+              const imageData = captureCanvasAsBase64();
+              
+              if (imageData && socket && game.gameId) {
+                setLastPredictionTime(Date.now());
+                setFirstPredictionSent(true);
+                
+                socket.emit('game:requestPrediction', { 
+                  roomId,
+                  imageData,
+                  word: game.currentWord,
+                  pastInitialWait: true,
+                  isFirstPrediction: true
+                });
+              }
+            }
+          }, 5000); // 5 more seconds after the 15 second wait
+          
+          return () => clearTimeout(firstPredictionTimer);
+        }, 15000);
+        
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [game.status, drawingStartTime, isMyTurn, isCanvasEnabled, roomId, socket, game.gameId, game.currentWord, canvasState.lines.length]);
+
+  // Add a quieter backup refresh mechanism for predictions
+  useEffect(() => {
+    if (game.status === 'playing' && socket && isMyTurn && isCanvasEnabled) {
+      // Create a periodic refresh mechanism to ensure predictions are happening
+      const refreshInterval = setInterval(() => {
+        const now = Date.now();
+        const forceRefreshTime = drawingStartTime ? (now - drawingStartTime > 20000) : false;
+        
+        if (forceRefreshTime) {
+          // Force turn on predictions
+          setAllowPredictions(true);
+          
+          // If we haven't sent the first prediction and 20+ seconds have passed, send it now
+          if (!firstPredictionSent) {
+            const imageData = captureCanvasAsBase64();
+            if (imageData && socket && game.gameId) {
+              setLastPredictionTime(now);
+              setFirstPredictionSent(true);
+              
+              socket.emit('game:requestPrediction', { 
+                roomId,
+                imageData,
+                word: game.currentWord,
+                pastInitialWait: true,
+                isFirstPrediction: true
+              });
+            }
+          }
+        }
+      }, 5000); // Check every 5 seconds
+      
+      return () => clearInterval(refreshInterval);
+    }
+  }, [game.status, isMyTurn, isCanvasEnabled, socket, drawingStartTime, firstPredictionSent]);
 
   // If we don't have a roomId, show room selector
   if (!roomId) {
@@ -945,6 +1108,7 @@ const Canvas = () => {
                       size="icon"
                       variant="secondary"
                       onClick={handleSave}
+                      disabled={canvasState.lines.length === 0 || !isCanvasEnabled}
                     >
                       <FaSave />
                     </Button>
@@ -1008,21 +1172,14 @@ const Canvas = () => {
             
             {/* Add the PredictionDisplay component - only for drawer */}
             {isMyTurn && isCanvasEnabled && (
-              <div className="absolute top-4 left-4 z-50 w-72 space-y-3">
+              <div className="absolute top-4 left-4 z-50 w-72">
                 <PredictionDisplay 
                   showConfidence={true}
                   maxItems={3}
                   className="animate-in fade-in slide-in-from-top-5 duration-300"
                 />
                 
-                {/* Fix the type error by creating a non-null ref to pass */}
-                {canvasRef.current && (
-                  <AIPredictionActions 
-                    canvasRef={canvasRef as React.RefObject<HTMLCanvasElement>} 
-                    roomId={roomId!}
-                    className="animate-in fade-in slide-in-from-top-5 duration-300 delay-300"
-                  />
-                )}
+                {/* Remove the AIPredictionActions component completely */}
               </div>
             )}
             

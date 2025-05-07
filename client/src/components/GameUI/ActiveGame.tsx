@@ -3,6 +3,7 @@ import { useGame } from '@/contexts/GameContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { WaitingScreen } from '@/components/GameUI/WaitingScreen';
 import { WordSelectionDialog } from '@/components/WordSelectionDialog/WordSelectionDialog';
+import { GameEndScreen } from '@/components/GameUI/GameEndScreen';
 import { DrawingTimer } from '@/components/GameUI/DrawingTimer';
 import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
 import { FaClock } from 'react-icons/fa'; // Import for the FaClock icon
@@ -25,8 +26,9 @@ export function ActiveGame({
   onLeaveGame
 }: ActiveGameProps) {
   const { user } = useAuth();
-  const { game, isMyTurn, timeRemaining } = useGame(); // Add timeRemaining here
+  const { game, isMyTurn, timeRemaining } = useGame();
   const [showWordSelector, setShowWordSelector] = useState(false);
+  const [showGameEnd, setShowGameEnd] = useState(false);
   
   // Track when word selection should be shown and when canvas should be enabled
   useEffect(() => {
@@ -71,8 +73,23 @@ export function ActiveGame({
       console.log("ActiveGame - Not drawer's turn, disabling canvas");
       setShowWordSelector(false);
       setCanvasEnabled(false);
+      
+      // When status changes to round_end, ensure we clean up
+      if (game.status === 'round_end' || game.status === 'waiting') {
+        console.log("ActiveGame - Round ended or waiting, calling onRoundEnd callback");
+        if (onRoundEnd) onRoundEnd();
+      }
     }
-  }, [isMyTurn, game.status, game.wordOptions, game.currentDrawerId, game.currentWord, user?.id, canvasRef]);
+  }, [isMyTurn, game.status, game.wordOptions, game.currentDrawerId, game.currentWord, user?.id, canvasRef, onRoundEnd]);
+  
+  // Show game end screen when game is finished
+  useEffect(() => {
+    if (game.status === 'finished') {
+      setShowGameEnd(true);
+    } else {
+      setShowGameEnd(false);
+    }
+  }, [game.status]);
   
   // Handle completion of word selection - immediately enable canvas
   const handleWordSelectionComplete = () => {
@@ -103,12 +120,39 @@ export function ActiveGame({
     }, 50);
   };
   
+  // Handle play again
+  const handlePlayAgain = () => {
+    if (onLeaveGame) {
+      onLeaveGame();
+    }
+  };
+  
   // Check if we should display word options
   const hasWordOptions = Boolean(
     game.wordOptions && 
     Array.isArray(game.wordOptions) && 
     game.wordOptions.length > 0
   );
+  
+  // Force canvas reset when round ends or status changes to waiting
+  useEffect(() => {
+    if (game.status === 'round_end' || game.status === 'waiting') {
+      console.log(`ActiveGame - Status changed to ${game.status}, forcibly clearing canvas`);
+      
+      // Clear canvas state and call onRoundEnd
+      if (onRoundEnd) {
+        onRoundEnd();
+      }
+      
+      // Force canvas disable to ensure clean state transition
+      setCanvasEnabled(false);
+    }
+  }, [game.status, onRoundEnd, setCanvasEnabled]);
+  
+  // If game has finished, show the end screen
+  if (showGameEnd) {
+    return <GameEndScreen roomId={roomId} onPlayAgain={handlePlayAgain} />;
+  }
   
   // If it's our turn and we have word options, show the word selector
   if (isMyTurn && hasWordOptions && showWordSelector) {

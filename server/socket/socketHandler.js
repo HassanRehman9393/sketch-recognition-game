@@ -1004,11 +1004,30 @@ function initializeSocket(io) {
         const room = rooms.get(roomId);
         const user = users.get(socket.id);
         
-        // Only host can trigger auto-progression
-        if (!room || !user || user.userId !== room.host) {
+        // Allow both host and current drawer to trigger auto-progression
+        const game = activeGames.get(roomId);
+        if (!room || !user || 
+            (user.userId !== room.host && user.userId !== game?.currentDrawerId?.toString())) {
           if (callback) callback({ success: false, error: 'Unauthorized' });
           return;
         }
+        
+        // Clear canvas to provide visual feedback that round is ending
+        room.canvasState = { lines: [], undoStack: [] };
+        io.to(roomId).emit('canvas_cleared', { clearedBy: 'system' });
+        
+        // Cancel any active round timer
+        if (roundTimers.has(roomId)) {
+          clearTimeout(roundTimers.get(roomId));
+          roundTimers.delete(roomId);
+        }
+        
+        // Tell all clients that the round is ending with auto-advance
+        io.to(roomId).emit('game:autoAdvancing', {
+          nextRound: game.currentRound + 1,
+          totalRounds: game.totalRounds,
+          nextDrawerName: getNextDrawerName(game)
+        });
         
         // Schedule next turn setup
         setTimeout(async () => {
@@ -1025,12 +1044,12 @@ function initializeSocket(io) {
       }
     });
 
-    // Add prediction request handler
+    // Update prediction request handler to be cleaner
     socket.on('game:requestPrediction', async (data) => {
       try {
-        const { roomId, imageData, word } = data;
-        console.log(`Received prediction request for room: ${roomId}, image data length: ${imageData?.length || 0}`);
+        const { roomId, imageData, word, pastInitialWait, isFirstPrediction } = data;
         
+        // Simple validation for required data
         if (!imageData) {
           console.error('No image data provided for prediction');
           return;
@@ -1040,14 +1059,9 @@ function initializeSocket(io) {
         const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:5002';
         const axios = require('axios');
         
-        console.log(`Forwarding prediction request to AI service at ${aiServiceUrl}/api/recognize`);
-        
         const requestData = { 
           image_data: imageData // Use the correct field name expected by AI service
         };
-        
-        // Add debug logging to see what we're sending
-        console.log(`Request payload size: ${JSON.stringify(requestData).length} bytes`);
         
         // Increase the timeout to 15 seconds and add retry logic
         const maxRetries = 2;
@@ -1060,13 +1074,10 @@ function initializeSocket(io) {
               headers: {
                 'Content-Type': 'application/json'
               },
-              timeout: 15000 // Increased from 8000 to 15000 ms (15 seconds)
+              timeout: 15000 // 15 second timeout
             });
             
-            console.log('AI service response received:', aiResponse.data);
-            
             // Transform response to match client expectations
-            // Handle the nested predictions structure from the AI service
             let predictions = [];
             
             if (aiResponse.data && aiResponse.data.predictions) {
@@ -1090,8 +1101,6 @@ function initializeSocket(io) {
             
             const formattedResponse = { predictions };
             
-            console.log('Formatted predictions for client:', formattedResponse);
-            
             // Send predictions back to the client
             socket.emit('game:aiPrediction', formattedResponse);
             
@@ -1101,10 +1110,8 @@ function initializeSocket(io) {
             lastError = error;
             retryCount++;
             
-            // Log retry attempt
+            // Wait before retrying (exponential backoff)
             if (retryCount <= maxRetries) {
-              console.warn(`AI service request failed. Retrying (${retryCount}/${maxRetries})...`);
-              // Wait before retrying (exponential backoff)
               await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
           }
@@ -1112,10 +1119,9 @@ function initializeSocket(io) {
         
         // Handle case when all retries failed
         if (retryCount > maxRetries) {
-          console.error('Error processing AI prediction request after retries:', lastError.message);
-          
           // Return fallback predictions when AI service is unavailable
           const fallbackPredictions = generateFallbackPredictions(word);
+          
           socket.emit('game:aiPrediction', { 
             predictions: fallbackPredictions,
             isFallback: true
@@ -1123,10 +1129,6 @@ function initializeSocket(io) {
         }
       } catch (error) {
         console.error('Error processing AI prediction request:', error.message);
-        // If there's a response from the service with an error message, log it
-        if (error.response) {
-          console.error('AI service error details:', error.response.data);
-        }
         
         // Return fallback predictions with error flag
         socket.emit('game:aiPrediction', { 
@@ -1137,11 +1139,7 @@ function initializeSocket(io) {
       }
     });
 
-    /**
-     * Generate fallback predictions when AI service is unavailable
-     * @param {string} word Optional current word to bias predictions
-     * @returns {Array} Array of prediction objects
-     */
+    // Enhanced fallback prediction generator to ensure we always get results
     function generateFallbackPredictions(word = null) {
       // Use our defined trained categories
       const categories = trainedCategories;
@@ -1159,7 +1157,7 @@ function initializeSocket(io) {
           const confidence = 30 + Math.floor(rng() * 40); // 30-70% confidence
           predictions.push({
             label: cleanWord,
-            confidence: confidence
+            confidence: confidence / 100 // Convert to 0-1 scale for client
           });
         }
       }
@@ -1175,7 +1173,7 @@ function initializeSocket(io) {
           usedLabels.add(category);
           predictions.push({
             label: category,
-            confidence: 5 + Math.floor(rng() * 60) // 5-65% confidence
+            confidence: (5 + Math.floor(rng() * 60)) / 100 // 0.05-0.65 confidence
           });
         }
       }
@@ -1470,6 +1468,22 @@ async function setupNextTurn(io, roomId) {
     // Reset drawing flag for all players
     game.players.forEach(p => p.isDrawing = false);
     
+    // Check if all players have played in the current round
+    const allPlayersPlayed = game.players.every(p => p.hasPlayed);
+    
+    // If all players have played, increment the round counter
+    if (allPlayersPlayed) {
+      game.currentRound += 1;
+      // Reset hasPlayed for all players for the new round
+      game.players.forEach(p => p.hasPlayed = false);
+    }
+    
+    // Check if game is complete (all rounds played)
+    if (game.currentRound > game.totalRounds) {
+      await endGame(io, roomId);
+      return true;
+    }
+    
     // Get next drawer - this ensures equal turns for each player
     const nextDrawer = game.getNextDrawer();
     
@@ -1479,10 +1493,18 @@ async function setupNextTurn(io, roomId) {
       return true;
     }
     
+    // Reset canvas for all users
+    // First notify clients to clear their canvases
+    io.to(roomId).emit('canvas_cleared', { clearedBy: 'system' });
+    
+    // Then reset server-side canvas state
+    room.canvasState = { lines: [], undoStack: [] };
+    
     // Update next drawer and word options - use our defined categories
     game.currentDrawerId = nextDrawer.userId;
     game.wordOptions = getRandomWords(3);
     game.status = 'waiting';
+    game.aiPredictions = []; // Clear previous predictions
     
     // Mark the player as having played
     const drawerIndex = game.players.findIndex(p => 
@@ -1495,10 +1517,6 @@ async function setupNextTurn(io, roomId) {
     }
     
     await game.save();
-    
-    // Clear canvas for new turn
-    room.canvasState = { lines: [], undoStack: [] };
-    io.to(roomId).emit('canvas_cleared', { clearedBy: 'system' });
     
     // Send word options to the drawer
     const drawerSocketId = Array.from(users.entries())
@@ -1518,7 +1536,10 @@ async function setupNextTurn(io, roomId) {
       currentDrawerId: game.currentDrawerId,
       drawerName: nextDrawer.username,
       currentRound: game.currentRound,
-      totalRounds: game.totalRounds
+      totalRounds: game.totalRounds,
+      status: 'waiting', // Make sure we indicate we're in waiting state
+      players: game.players, // Send updated player scores
+      roundTransition: allPlayersPlayed // Indicate if we moved to a new round
     });
     
     return true;

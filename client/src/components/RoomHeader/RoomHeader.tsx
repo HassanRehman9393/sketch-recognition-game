@@ -312,12 +312,21 @@ export function RoomHeader({
           <span>Room ID: {roomId.substring(0, 8)}...</span>
           
           {isInGame && game.status && (
-            <Badge 
-              variant="outline" 
-              className="bg-blue-500/10 text-blue-500 border-blue-500 text-xs px-2 py-0"
-            >
-              Game Status: {game.status.charAt(0).toUpperCase() + game.status.slice(1)}
-            </Badge>
+            <>
+              <Badge 
+                variant="outline" 
+                className="bg-blue-500/10 text-blue-500 border-blue-500 text-xs px-2 py-0"
+              >
+                Game Status: {game.status.charAt(0).toUpperCase() + game.status.slice(1)}
+              </Badge>
+              
+              <Badge
+                variant="outline"
+                className="bg-primary/10 text-primary border-primary/20 text-xs px-2 py-0"
+              >
+                Round {game.currentRound}/{game.totalRounds}
+              </Badge>
+            </>
           )}
         </div>
         <div>

@@ -30,7 +30,9 @@ interface GameState {
     label: string;
     confidence: number;
   }>;
-  lastPredictionTime?: number;
+  lastPredictionTime?: number | null; // Change this to allow null
+  roundScore: number;              // Add roundScore to track current score
+  autoAdvanceTimeout: number | null; // Track auto-advance timeout
 }
 
 interface GameContextType {
@@ -49,6 +51,8 @@ interface GameContextType {
   sendDrawingForPrediction: (roomId: string, imageData: string) => Promise<void>;
   requestNextTurn: (roomId: string) => Promise<boolean>;
   endGame: (roomId: string) => Promise<boolean>;
+  roundScore: number;              // Expose roundScore
+  calculateScore: (timeElapsed: number) => number;  // Add score calculation function
 }
 
 const defaultGameState: GameState = {
@@ -62,7 +66,9 @@ const defaultGameState: GameState = {
   correctGuesses: [],
   hasSubmitted: false,
   wordOptions: [],
-  aiPredictions: []
+  aiPredictions: [],
+  roundScore: 0,
+  autoAdvanceTimeout: null,
 };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -76,6 +82,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [countdown, setCountdown] = useState<NodeJS.Timeout | null>(null);
   const [predictionThrottleTimeout, setPredictionThrottleTimeout] = useState<NodeJS.Timeout | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [roundScore, setRoundScore] = useState<number>(0);
   
   // Derived states
   const isInGame = game.status === 'playing' || game.status === 'round_end';
@@ -110,6 +117,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setCountdown(null);
     }
   }, [game.status, countdown]);
+
+  // Calculate score based on time taken (in seconds)
+  const calculateScore = (timeElapsedSeconds: number): number => {
+    // Maximum score is 100 points at 0 seconds
+    // Minimum score is 10 points at 55+ seconds
+    if (timeElapsedSeconds <= 5) return 100;  // Perfect score for super fast (≤5s)
+    if (timeElapsedSeconds <= 10) return 90;  // Excellent (6-10s)
+    if (timeElapsedSeconds <= 15) return 80;  // Great (11-15s)
+    if (timeElapsedSeconds <= 20) return 70;  // Very good (16-20s)
+    if (timeElapsedSeconds <= 30) return 60;  // Good (21-30s)
+    if (timeElapsedSeconds <= 40) return 40;  // Average (31-40s)
+    if (timeElapsedSeconds <= 50) return 20;  // Slow (41-50s)
+    return 10;  // Very slow (51-60s)
+  };
 
   // Setup socket event listeners
   useEffect(() => {
@@ -369,7 +390,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     };
     
-    // AI Prediction event
+    // AI Prediction event - enhanced to handle scoring and auto-advance
     const handleAIPrediction = (data: any) => {
       console.log("Received AI prediction response:", data);
       
@@ -394,13 +415,34 @@ export function GameProvider({ children }: { children: ReactNode }) {
               lastPredictionTime: Date.now()
             }));
             
-            // If we get a high-confidence match with the current word
+            // If we get a match with the current word
             const topPrediction = formattedPredictions[0];
-            if (game.currentWord && isMyTurn && topPrediction && 
-                topPrediction.confidence > 0.7 && 
-                topPrediction.label.toLowerCase() === game.currentWord.toLowerCase()) {
+            const currentWord = game.currentWord?.toLowerCase();
+            const hasMatch = formattedPredictions.some((p: {label: string; confidence: number}) => 
+              p.label.toLowerCase() === currentWord
+            );
+            
+            if (isMyTurn && currentWord && hasMatch && game.roundStartTime) {
+              // Found a match!
+              console.log("AI recognized the drawing correctly:", currentWord);
               
-              console.log("High confidence match detected:", topPrediction);
+              // Calculate time elapsed in seconds
+              const startTime = new Date(game.roundStartTime).getTime();
+              const now = Date.now();
+              const timeElapsedSeconds = Math.floor((now - startTime) / 1000);
+              
+              // Calculate score based on time
+              const score = calculateScore(timeElapsedSeconds);
+              setRoundScore(score);
+              
+              // Update score in player data first
+              if (socket && game.gameId) {
+                socket.emit('game:updateScore', { 
+                  roomId: game.gameId, 
+                  score, 
+                  recognitionTimeSeconds: timeElapsedSeconds 
+                });
+              }
               
               // Play a success sound if available
               const successSound = document.getElementById('success-sound') as HTMLAudioElement;
@@ -408,12 +450,52 @@ export function GameProvider({ children }: { children: ReactNode }) {
                 successSound.play().catch(e => console.log('Could not play sound:', e));
               }
               
-              // Show a toast notification for the high-confidence match
+              // Show a toast notification for the match with detailed score info
               toast({
-                title: "AI recognized your drawing!",
-                description: `The AI is confident this is a "${topPrediction.label}" (${Math.floor(topPrediction.confidence * 100)}%)`,
-                duration: 3000,
+                title: "🎯 Drawing recognized!",
+                description: `Your "${currentWord}" drawing was recognized in ${timeElapsedSeconds}s. +${score} points!`,
+                duration: 5000,
               });
+              
+              // Clear any existing auto-advance timeout
+              if (game.autoAdvanceTimeout) {
+                clearTimeout(game.autoAdvanceTimeout);
+              }
+              
+              // Set up auto-advance to next player after 3 seconds
+              if (game.gameId) {
+                console.log("Setting up auto-advance timeout");
+                const timeout = setTimeout(() => {
+                  console.log("Auto-advance timeout triggered");
+                  
+                  // Clear the canvas first before advancing
+                  socket.emit('clear_canvas', { roomId: game.gameId });
+                  
+                  // Now request next turn
+                  requestNextTurn(game.gameId!).then(success => {
+                    if (success) {
+                      console.log("Successfully advanced to next turn");
+                      // Reset round score after advancing
+                      setRoundScore(0);
+                      
+                      // Reset AI predictions
+                      setGame(prev => ({
+                        ...prev,
+                        aiPredictions: [],
+                        lastPredictionTime: null
+                      }));
+                    } else {
+                      console.error("Failed to auto-advance to next turn");
+                    }
+                  });
+                }, 3000); // 3 seconds
+                
+                // Store timeout ID
+                setGame(prev => ({
+                  ...prev,
+                  autoAdvanceTimeout: timeout as unknown as number
+                }));
+              }
             }
           }
         } catch (error) {
@@ -455,7 +537,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
         correctGuesses: data.correctGuessers || [],
         hasSubmitted: false,
         wordOptions: data.wordOptions || [],
-        aiPredictions: data.aiPredictions || []
+        aiPredictions: data.aiPredictions || [],
+        roundScore: 0,
+        autoAdvanceTimeout: null,
       });
       
       // If game is playing and we just reconnected, start the timer
@@ -506,8 +590,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
       socket.off('game:state', handleGameState);
       socket.off('game:aiPrediction', handleAIPrediction);
       socket.off('game:playerDisconnected', handlePlayerDisconnected);
+      if (game.autoAdvanceTimeout) {
+        clearTimeout(game.autoAdvanceTimeout);
+      }
     };
-  }, [socket, isConnected, toast, user, countdown, game.currentWord, isMyTurn]);
+  }, [socket, isConnected, toast, user, countdown, game.currentWord, isMyTurn, game.gameId, game.roundStartTime, game.autoAdvanceTimeout]);
 
   // Check for game in progress on initial load
   useEffect(() => {
@@ -823,6 +910,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     isMyTurn,
     timeRemaining,
     aiPredictions: game.aiPredictions || null,
+    roundScore,
+    calculateScore,
     startGame,
     selectWord,
     makeGuess,
