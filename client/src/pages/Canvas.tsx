@@ -28,6 +28,8 @@ import { RoomHeader } from '@/components/RoomHeader/RoomHeader';
 import { ActiveGame } from '@/components/GameUI/ActiveGame';
 import { CurrentDrawerDisplay } from '@/components/GameUI/CurrentDrawerDisplay';
 import { PredictionDisplay } from "@/components/PredictionDisplay/PredictionDisplay";
+import { ScoreDisplay } from "@/components/GameUI/ScoreDisplay"; // Add this import
+import { ForcedScoreDisplay } from "@/components/GameUI/ForcedScoreDisplay"; // Add this import
 
 
 interface Point {
@@ -85,6 +87,11 @@ const Canvas = () => {
   
   const [roomInfo, setRoomInfo] = useState<{name: string, code: string, host?: string} | null>(null);
   const [isHost, setIsHost] = useState(false);
+  
+  // Add state for score display at the beginning of the component
+  const [scoreDisplay, setScoreDisplay] = useState<{score: number, visible: boolean}>({
+    score: 0, visible: false
+  });
   
   // Save roomId to localStorage when it changes
   useEffect(() => {
@@ -322,11 +329,140 @@ const Canvas = () => {
     };
   }, [socket, isConnected, user, toast]);
 
+  // Effect to monitor for score changes and display score popup
+  useEffect(() => {
+    console.log("Score effect triggered, checking game.roundScore:", game.roundScore);
+    
+    if (game.roundScore > 0 && isMyTurn) {
+      console.log("SCORE DISPLAY TRIGGER: Setting score to visible with value:", game.roundScore);
+      
+      // Set score display state
+      setScoreDisplay({
+        score: game.roundScore,
+        visible: true
+      });
+      
+      // Hide after delay - using state update to ensure we don't have closure issues
+      const timer = setTimeout(() => {
+        setScoreDisplay(prev => ({ ...prev, visible: false }));
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [game.roundScore, isMyTurn]);
+
+  // Add new useEffect to ensure game score updates are captured directly from socket message
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleScoreAwarded = (data: any) => {
+      console.log("Direct score awarded socket event received:", data);
+      
+      // Check if this is for the current user and they are the drawer
+      if (isMyTurn && data.userId === user?.id) {
+        console.log("Directly setting score display from socket event:", data.score);
+        
+        // Force show the score display regardless of other state
+        setScoreDisplay({
+          score: data.score,
+          visible: true
+        });
+        
+        // Hide after delay
+        const timer = setTimeout(() => {
+          setScoreDisplay(prev => ({ ...prev, visible: false }));
+        }, 3000);
+        
+        return () => clearTimeout(timer);
+      }
+    };
+    
+    socket.on('game:scoreAwarded', handleScoreAwarded);
+    
+    return () => {
+      socket.off('game:scoreAwarded', handleScoreAwarded);
+    };
+  }, [socket, isConnected, isMyTurn, user?.id]);
+
+  // Effect to monitor for score changes and display score popup - complete rewrite of this function
+  useEffect(() => {
+    console.log("Score effect triggered, checking game.roundScore:", game.roundScore);
+    
+    if (game.roundScore > 0 && isMyTurn) {
+      console.log("SCORE DISPLAY TRIGGER: Setting score to visible with value:", game.roundScore);
+      
+      // First reset the display to ensure React notices the change
+      setScoreDisplay({
+        score: 0,
+        visible: false
+      });
+      
+      // Force this code to run after React has processed state changes
+      setTimeout(() => {
+        // Now show score with the correct value
+        setScoreDisplay({
+          score: game.roundScore,
+          visible: true
+        });
+        
+        console.log("Score popup should now be visible with score:", game.roundScore);
+        
+        // Hide after a delay
+        const hideTimer = setTimeout(() => {
+          setScoreDisplay({
+            score: 0,
+            visible: false
+          });
+        }, 3000);
+        
+        // Cleanup timers on unmount or if effect runs again
+        return () => {
+          clearTimeout(hideTimer);
+        };
+      }, 10);
+    }
+  }, [game.roundScore, isMyTurn]);
+
+  // Add new useEffect to ensure game score updates are captured directly from socket message
+  useEffect(() => {
+    if (!socket || !isConnected) return;
+    
+    const handleScoreAwarded = (data: any) => {        
+      console.log("Direct score awarded socket event received:", data);
+      
+      // Check if this is for the current user and they are the drawer
+      if (isMyTurn && data.userId === user?.id) {
+        console.log("Directly setting score display from socket event:", data.score);
+        
+        // Force show the score display regardless of other state
+        setScoreDisplay({
+          score: data.score,
+          visible: true
+        });
+        
+        // Hide after delay
+        const timer = setTimeout(() => {
+          setScoreDisplay({
+            score: 0,
+            visible: false
+          });
+        }, 3000);
+        
+        return () => clearTimeout(timer);
+      }
+    };
+    
+    socket.on('game:scoreAwarded', handleScoreAwarded);
+    
+    return () => {
+      socket.off('game:scoreAwarded', handleScoreAwarded);
+    };
+  }, [socket, isConnected, isMyTurn, user?.id]);
+
   // Handle drawing actions
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-
+    if (!canvas) return;  
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -408,10 +544,8 @@ const Canvas = () => {
       // Add a subtle indicator that canvas is enabled
       canvas.classList.add('border-primary');
       canvas.classList.add('border-2');
-      
       // Set tabIndex to make canvas focusable
       canvas.tabIndex = 0;
-      
       // Focus the canvas to enable immediate interaction
       canvas.focus();
     } else {
@@ -425,7 +559,6 @@ const Canvas = () => {
   // Handle mouse/touch events with socket integration
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (!roomId || !socket || !isCanvasEnabled) return;
-    
     const canvas = canvasRef.current;
     if (!canvas) return;
     
@@ -471,7 +604,6 @@ const Canvas = () => {
     
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
@@ -543,6 +675,7 @@ const Canvas = () => {
       });
       
       return {
+        ...prev,
         lines: [...prev.lines, finishedLine],
         currentLine: null,
       };
@@ -573,10 +706,8 @@ const Canvas = () => {
 
   const handleRedo = () => {
     if (!roomId || !socket || !isCanvasEnabled || undoStack.length === 0) return;
-    
     const lineToRedo = undoStack[undoStack.length - 1];
     const newUndoStack = undoStack.slice(0, -1);
-    
     socket.emit('redo', { roomId, line: lineToRedo });
     
     setUndoStack(newUndoStack);
@@ -588,7 +719,6 @@ const Canvas = () => {
 
   const handleClear = () => {
     if (!roomId || !socket || !isCanvasEnabled) return;
-    
     socket.emit('clear_canvas', { roomId });
     setCanvasState({ lines: [], currentLine: null });
     setUndoStack([]);
@@ -780,14 +910,12 @@ const Canvas = () => {
     }, 1000); // Check every second if we need to send a prediction
     
     return () => clearInterval(predictionTimer);
-  }, [isCanvasEnabled, isInGame, isMyTurn, timeRemaining, roomId, socket, game.gameId, game.currentWord, 
-      game.aiPredictions, canvasState.lines, allowPredictions, lastPredictionTime]);
+  }, [isCanvasEnabled, isInGame, isMyTurn, timeRemaining, roomId, socket, game.gameId, game.currentWord, game.aiPredictions, canvasState.lines, allowPredictions, lastPredictionTime]);
 
   // Listen for round transitions to reset canvas and prediction state
   useEffect(() => {
     // Reset canvas and prediction state when status changes to 'round_end' or 'waiting'
-    if ((game.status === 'round_end' || game.status === 'waiting') && 
-        canvasState.lines.length > 0) {
+    if ((game.status === 'round_end' || game.status === 'waiting') && canvasState.lines.length > 0) {
       setCanvasState({
         lines: [],
         currentLine: null
@@ -828,7 +956,7 @@ const Canvas = () => {
   // Track when drawing starts and setup timing for predictions
   useEffect(() => {
     // Reset these values when the round/game status changes
-    if (game.status !== 'playing') {
+    if (game.status !== 'playing') { 
       setDrawingStartTime(null);
       setAllowPredictions(false);
       setFirstPredictionSent(false);
@@ -995,6 +1123,7 @@ const Canvas = () => {
                     variant={tool === 'eraser' ? 'default' : 'outline'}
                     onClick={() => setTool('eraser')}
                     disabled={!isCanvasEnabled}
+                    className={isCanvasEnabled ? 'hover:bg-primary/90' : ''}
                   >
                     <FaEraser />
                   </Button>
@@ -1149,7 +1278,6 @@ const Canvas = () => {
                     }`} />
                   </div>
                 </div>
-                
                 <div className="flex flex-col">
                   <span className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold">
                     Time Left
@@ -1182,9 +1310,13 @@ const Canvas = () => {
                 {/* Remove the AIPredictionActions component completely */}
               </div>
             )}
-            
+
             {/* Display current drawer name for non-drawing players */}
             <CurrentDrawerDisplay isVisible={game.status === 'playing' && !isMyTurn} />
+
+            {/* Score display - now we use BOTH components for redundancy */}
+            <ScoreDisplay score={scoreDisplay.score} visible={scoreDisplay.visible} />
+            {game.roundScore > 0 && isMyTurn && <ForcedScoreDisplay score={game.roundScore} />}
             
             <canvas
               ref={canvasRef}
@@ -1198,21 +1330,21 @@ const Canvas = () => {
               onTouchEnd={endDrawing}
             />
           </motion.div>
-        </div>
 
-        {/* Mobile brush size control */}
-        <div className="md:hidden px-4 py-2 bg-background border rounded-lg mt-2">
-          <div className="flex items-center gap-4">
-            <span className="text-sm">Brush Size: {brushWidth}px</span>
-            <Slider
-              min={1}
-              max={20}
-              step={1}
-              value={[brushWidth]}
-              onValueChange={(value) => setBrushWidth(value[0])}
-              className="flex-1"
-              disabled={!isCanvasEnabled}
-            />
+          {/* Mobile brush size control */}
+          <div className="md:hidden px-4 py-2 bg-background border rounded-lg mt-2">
+            <div className="flex items-center gap-4">
+              <span className="text-sm">Brush Size: {brushWidth}px</span>
+              <Slider
+                min={1}
+                max={20}
+                step={1}
+                value={[brushWidth]}
+                onValueChange={(value) => setBrushWidth(value[0])}
+                className="flex-1"
+                disabled={!isCanvasEnabled}
+              />
+            </div>
           </div>
         </div>
       </div>

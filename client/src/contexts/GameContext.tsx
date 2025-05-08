@@ -399,7 +399,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
           // Transform the predictions to match our interface
           const formattedPredictions = data.predictions.map((p: any) => ({
             label: p.class || p.label || "",
-            confidence: p.confidence / 100  // Convert from percentage to 0-1 scale if needed
+            confidence: p.confidence // Use confidence directly from AI service
           }));
           
           // Sort predictions by confidence (highest first)
@@ -416,7 +416,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
             }));
             
             // If we get a match with the current word
-            const topPrediction = formattedPredictions[0];
             const currentWord = game.currentWord?.toLowerCase();
             const hasMatch = formattedPredictions.some((p: {label: string; confidence: number}) => 
               p.label.toLowerCase() === currentWord
@@ -433,21 +432,36 @@ export function GameProvider({ children }: { children: ReactNode }) {
               
               // Calculate score based on time
               const score = calculateScore(timeElapsedSeconds);
+              
+              // CRITICAL FIX: Update both state variables simultaneously
+              console.log("MATCH FOUND! Setting scores:", score);
               setRoundScore(score);
               
-              // Update score in player data first
+              // Delay the game state update slightly to ensure it triggers properly
+              setTimeout(() => {
+                setGame(prev => ({
+                  ...prev,
+                  roundScore: score
+                }));
+              }, 10);
+              
+              // Update score in player data first - but do this multiple times to ensure delivery
               if (socket && game.gameId) {
                 socket.emit('game:updateScore', { 
                   roomId: game.gameId, 
                   score, 
                   recognitionTimeSeconds: timeElapsedSeconds 
                 });
-              }
-              
-              // Play a success sound if available
-              const successSound = document.getElementById('success-sound') as HTMLAudioElement;
-              if (successSound) {
-                successSound.play().catch(e => console.log('Could not play sound:', e));
+                
+                // Send a backup request after a short delay
+                setTimeout(() => {
+                  socket.emit('game:updateScore', { 
+                    roomId: game.gameId, 
+                    score, 
+                    recognitionTimeSeconds: timeElapsedSeconds,
+                    isRetry: true
+                  });
+                }, 300);
               }
               
               // Show a toast notification for the match with detailed score info

@@ -1044,10 +1044,10 @@ function initializeSocket(io) {
       }
     });
 
-    // Update prediction request handler to be cleaner
+    // Update prediction request handler to be cleaner and not modify AI service results
     socket.on('game:requestPrediction', async (data) => {
       try {
-        const { roomId, imageData, word, pastInitialWait, isFirstPrediction } = data;
+        const { roomId, imageData, word } = data;
         
         // Simple validation for required data
         if (!imageData) {
@@ -1077,32 +1077,13 @@ function initializeSocket(io) {
               timeout: 15000 // 15 second timeout
             });
             
-            // Transform response to match client expectations
-            let predictions = [];
-            
+            // Send prediction results directly without modifying confidence values
             if (aiResponse.data && aiResponse.data.predictions) {
-              if (aiResponse.data.predictions.top_predictions) {
-                // The AI service returns predictions in a nested structure
-                predictions = aiResponse.data.predictions.top_predictions.map(pred => ({
-                  label: pred.class || pred.label || "",
-                  confidence: pred.confidence || 0
-                }));
-              } else if (Array.isArray(aiResponse.data.predictions)) {
-                // Handle case where predictions is a direct array
-                predictions = aiResponse.data.predictions.map(pred => ({
-                  label: pred.class || pred.label || "",
-                  confidence: pred.confidence || 0
-                }));
-              }
+              // Just pass along the predictions as-is from the AI service
+              socket.emit('game:aiPrediction', { 
+                predictions: aiResponse.data.predictions.top_predictions || aiResponse.data.predictions
+              });
             }
-            
-            // Sort predictions by confidence
-            predictions.sort((a, b) => b.confidence - a.confidence);
-            
-            const formattedResponse = { predictions };
-            
-            // Send predictions back to the client
-            socket.emit('game:aiPrediction', formattedResponse);
             
             // Break out of retry loop on success
             break;
@@ -1119,84 +1100,86 @@ function initializeSocket(io) {
         
         // Handle case when all retries failed
         if (retryCount > maxRetries) {
-          // Return fallback predictions when AI service is unavailable
-          const fallbackPredictions = generateFallbackPredictions(word);
-          
+          console.error('Failed to get AI predictions after multiple attempts:', lastError?.message);
+          // Inform client about failure
           socket.emit('game:aiPrediction', { 
-            predictions: fallbackPredictions,
-            isFallback: true
+            error: 'Failed to process drawing',
+            predictions: []
           });
         }
       } catch (error) {
         console.error('Error processing AI prediction request:', error.message);
         
-        // Return fallback predictions with error flag
+        // Return empty predictions with error flag
         socket.emit('game:aiPrediction', { 
           error: 'Failed to process drawing',
-          predictions: generateFallbackPredictions(data?.word),
-          isFallback: true
+          predictions: []
         });
       }
     });
 
-    // Enhanced fallback prediction generator to ensure we always get results
-    function generateFallbackPredictions(word = null) {
-      // Use our defined trained categories
-      const categories = trainedCategories;
-      
-      // Create randomized but deterministic predictions
-      const seed = Date.now() % 10000;
-      const rng = mulberry32(seed);
-      
-      // If we know the current word, ensure it appears in the list
-      let predictions = [];
-      if (word && typeof word === 'string' && word.trim() !== '') {
-        const cleanWord = word.trim().toLowerCase();
-        if (categories.includes(cleanWord)) {
-          // Give the actual word a reasonable confidence
-          const confidence = 30 + Math.floor(rng() * 40); // 30-70% confidence
-          predictions.push({
-            label: cleanWord,
-            confidence: confidence / 100 // Convert to 0-1 scale for client
-          });
-        }
-      }
-      
-      // Add other random predictions
-      const usedLabels = new Set(predictions.map(p => p.label));
-      while (predictions.length < 5) {
-        // Pick a random category
-        const idx = Math.floor(rng() * categories.length);
-        const category = categories[idx];
+    // Update prediction request handler to emit a dedicated score event
+    socket.on('game:updateScore', async (data) => {
+      try {
+        const { roomId, score, recognitionTimeSeconds } = data;
         
-        if (!usedLabels.has(category)) {
-          usedLabels.add(category);
-          predictions.push({
-            label: category,
-            confidence: (5 + Math.floor(rng() * 60)) / 100 // 0.05-0.65 confidence
-          });
+        // Get the user info and room
+        const user = users.get(socket.id);
+        const room = rooms.get(roomId);
+        
+        if (!user || !room) {
+          return;
         }
+        
+        console.log(`User ${user.username} scored ${score} points in ${recognitionTimeSeconds}s`);
+        
+        // Find the game
+        const game = activeGames.get(roomId);
+        if (!game) return;
+        
+        // Find the player in the game
+        const playerIndex = game.players.findIndex(p => p.userId.toString() === user.userId);
+        if (playerIndex === -1) return;
+        
+        // Update player score
+        game.players[playerIndex].score += score;
+        
+        // First send the direct, targeted score event to the drawer only
+        socket.emit('game:scoreAwarded', {
+          userId: user.userId,
+          username: user.username,
+          score,
+          roundScore: score,
+          recognitionTimeSeconds,
+          totalScore: game.players[playerIndex].score,
+          timestamp: Date.now() // Add timestamp to ensure uniqueness
+        });
+        
+        // Then send a second copy with a short delay to handle any race conditions
+        setTimeout(() => {
+          socket.emit('game:scoreAwarded', {
+            userId: user.userId,
+            username: user.username,
+            score,
+            roundScore: score,
+            recognitionTimeSeconds,
+            totalScore: game.players[playerIndex].score,
+            timestamp: Date.now() + 1 // Use different timestamp to prevent deduplication
+          });
+        }, 100);
+        
+        // Also notify all users about score update
+        io.to(roomId).emit('game:scoreUpdate', {
+          userId: user.userId,
+          username: user.username,
+          roundScore: score,
+          recognitionTimeSeconds,
+          totalScore: game.players[playerIndex].score
+        });
+      } catch (error) {
+        console.error('Error updating score:', error);
       }
-      
-      // Sort by confidence
-      predictions.sort((a, b) => b.confidence - a.confidence);
-      
-      return predictions;
-    }
-
-    /**
-     * Simple seedable RNG function
-     * @param {number} seed A numeric seed
-     * @returns {function} RNG function that returns values between 0 and 1
-     */
-    function mulberry32(seed) {
-      return function() {
-        let t = seed += 0x6D2B79F5;
-        t = Math.imul(t ^ t >>> 15, t | 1);
-        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-        return ((t ^ t >>> 14) >>> 0) / 4294967296;
-      };
-    }
+    });
   });
 }
 
