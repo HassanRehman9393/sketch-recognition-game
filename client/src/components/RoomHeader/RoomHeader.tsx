@@ -16,8 +16,6 @@ import { UsersList } from '@/components/UsersList/UsersList';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
-// Remove unused import
-// import { RoomCodeShare } from '@/components/RoomCodeShare/RoomCodeShare';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -51,9 +49,7 @@ export function RoomHeader({
     }
   }, [roomUsers]);
   
-  // Fix: Force enable the start button regardless of player count
-  // This ensures the host can start the game with any number of players
-  const hasEnoughPlayers = true; // Changed from roomUsers.length >= MIN_PLAYERS
+  const hasEnoughPlayers = true; 
   
   // Copy room code to clipboard
   const copyRoomCode = () => {
@@ -166,9 +162,7 @@ export function RoomHeader({
               <h1 className="text-2xl font-bold flex items-center gap-1.5">
                 <span className="text-primary">Quick</span>
                 <span>Doodle</span>
-                <Badge variant="outline" className="ml-2 text-xs font-normal">
-                  {isInGame ? 'Game Mode' : 'Canvas Mode'}
-                </Badge>
+                
               </h1>
               <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
                 <span className="font-medium">{roomName}</span>
@@ -202,10 +196,7 @@ export function RoomHeader({
           {/* Connected users count with popover */}
           <div className="flex items-center gap-2">
             <div className="text-xs text-muted-foreground hidden md:block">
-              <span className="flex items-center gap-1">
-                <FaUsers size={12} />
-                <span>{roomUsers.length} {roomUsers.length === 1 ? 'user' : 'users'}</span>
-              </span>
+              
             </div>
             
             {roomCode && (
@@ -309,7 +300,7 @@ export function RoomHeader({
           >
             Online
           </Badge>
-          <span>Room ID: {roomId.substring(0, 8)}...</span>
+         
           
           {isInGame && game.status && (
             <>
