@@ -19,8 +19,6 @@ export function PredictionDisplay({
   className = ''
 }: PredictionDisplayProps) {
   const { aiPredictions, game, roundScore, timeRemaining } = useGame();
-  const [expanded, setExpanded] = useState(false);
-  const [highlightPrediction, setHighlightPrediction] = useState(false);
   const [recognitionTime, setRecognitionTime] = useState<number | null>(null);
   const [showAutoAdvanceCountdown, setShowAutoAdvanceCountdown] = useState(false);
   const [autoAdvanceSeconds, setAutoAdvanceSeconds] = useState(3);
@@ -77,8 +75,7 @@ export function PredictionDisplay({
   const correctPrediction = aiPredictions?.find(p => 
     p.label.toLowerCase() === game.currentWord?.toLowerCase()
   );
-  
-  // Sort predictions to show correct match at the top
+    // Sort predictions to always show correct match at the top
   const sortedPredictions = useMemo(() => {
     if (!aiPredictions || aiPredictions.length === 0) return [];
     
@@ -92,8 +89,12 @@ export function PredictionDisplay({
         p.label.toLowerCase() !== game.currentWord?.toLowerCase()
       );
       
-      // Then add it to the top
-      return [correctPrediction, ...filtered];
+      // Then add it to the top, and sort the rest by confidence
+      const sortedFiltered = filtered.sort((a, b) => 
+        (b.confidence || 0) - (a.confidence || 0)
+      );
+      
+      return [correctPrediction, ...sortedFiltered];
     }
     
     // Otherwise sort by confidence
@@ -219,10 +220,8 @@ export function PredictionDisplay({
       </Card>
     );
   }
-
-  // Display predictions
-  const displayedPredictions = expanded ? sortedPredictions : sortedPredictions.slice(0, maxItems);
-  const hasMorePredictions = sortedPredictions.length > maxItems;
+  // Display predictions - always limit to top 3
+  const displayedPredictions = sortedPredictions.slice(0, 3);
 
   return (
     <Card className={`${className} shadow-md backdrop-blur-sm`}>
@@ -243,7 +242,7 @@ export function PredictionDisplay({
           )}
         </div>
         
-        {/* Predictions list */}
+        {/* Predictions list - always showing top 3 */}
         <div className="py-2">
           {displayedPredictions.map((prediction, i) => {
             const isMatch = prediction.label.toLowerCase() === game.currentWord?.toLowerCase();
@@ -273,18 +272,15 @@ export function PredictionDisplay({
                   </span>
                 </div>
                 {showConfidence && (
-                  <div className="flex items-center gap-1">
-                    <div className="h-2 w-16 bg-muted rounded-full overflow-hidden">
+                  <div className="flex items-center gap-1">                    <div className="h-2 w-16 bg-muted rounded-full overflow-hidden">
                       <div 
                         className={cn(
                           "h-full rounded-full",
                           isMatch ? "bg-green-500" : "bg-blue-500"
                         )}
-                        style={{ width: `${(prediction.confidence || 0) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted-foreground w-8 text-right">
-                      {Math.round((prediction.confidence || 0) * 100)}%
+                        style={{ width: `${(prediction.confidence || 0)}%` }}
+                      />                    </div>                    <span className="text-xs text-muted-foreground w-8 text-right">
+                      {(prediction.confidence || 0).toFixed(1)}%
                     </span>
                   </div>
                 )}
@@ -292,18 +288,6 @@ export function PredictionDisplay({
             );
           })}
         </div>
-        
-        {/* Show more/less button */}
-        {hasMorePredictions && (
-          <div className="px-4 py-1.5 border-t">
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="w-full text-xs text-center text-muted-foreground hover:text-foreground"
-            >
-              {expanded ? "Show less" : `Show ${sortedPredictions.length - maxItems} more`}
-            </button>
-          </div>
-        )}
         
         {/* Auto-advance countdown */}
         {showAutoAdvanceCountdown && (
